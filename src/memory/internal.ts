@@ -1,7 +1,91 @@
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { LRUCache } from "../infra/cache/lru-cache.js";
 import { hashText as workerHashText } from "../workers/index.js";
+
+// 디렉토리 목록 캐시 (Task 26)
+const directoryListingCache = new LRUCache<{
+  files: string[];
+  dirMtimes: Map<string, number>;
+}>({
+  maxSize: 50,
+  defaultTTL: 60000, // 1분 기본 TTL
+});
+
+/**
+ * 디렉토리의 최신 mtime 계산
+ */
+async function getDirectoryMtime(dir: string): Promise<number> {
+  try {
+    const stat = await fs.stat(dir);
+    return stat.mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 여러 디렉토리의 mtime 수집
+ */
+async function collectDirectoryMtimes(
+  workspaceDir: string,
+  extraPaths?: string[],
+): Promise<Map<string, number>> {
+  const mtimes = new Map<string, number>();
+
+  // 주요 디렉토리들의 mtime 수집
+  const dirsToCheck = [workspaceDir];
+
+  const memoryDir = path.join(workspaceDir, "memory");
+  dirsToCheck.push(memoryDir);
+
+  if (extraPaths) {
+    for (const extraPath of extraPaths) {
+      const resolved = path.isAbsolute(extraPath)
+        ? path.resolve(extraPath)
+        : path.resolve(workspaceDir, extraPath);
+      dirsToCheck.push(resolved);
+    }
+  }
+
+  for (const dir of dirsToCheck) {
+    const mtime = await getDirectoryMtime(dir);
+    if (mtime > 0) {
+      mtimes.set(dir, mtime);
+    }
+  }
+
+  return mtimes;
+}
+
+/**
+ * 캐시된 디렉토리 목록이 유효한지 확인 (mtime 기반)
+ */
+async function isCacheValid(
+  cacheKey: string,
+  workspaceDir: string,
+  extraPaths?: string[],
+): Promise<boolean> {
+  const cached = directoryListingCache.get(cacheKey);
+  if (!cached) {
+    return false;
+  }
+
+  // 현재 디렉토리 mtime 수집
+  const currentMtimes = await collectDirectoryMtimes(workspaceDir, extraPaths);
+
+  // 저장된 mtime과 비교
+  for (const [dir, currentMtime] of currentMtimes.entries()) {
+    const cachedMtime = cached.dirMtimes.get(dir);
+    if (cachedMtime === undefined || currentMtime > cachedMtime) {
+      // 디렉토리가 변경됨
+      return false;
+    }
+  }
+
+  return true;
+}
 
 export type MemoryFileEntry = {
   path: string;
@@ -75,10 +159,35 @@ async function walkDir(dir: string, files: string[]) {
   }
 }
 
+/**
+ * 디렉토리 목록 캐시 통계 조회 (테스트/모니터링용)
+ */
+export function getDirectoryListingCacheStats() {
+  return directoryListingCache.getStats();
+}
+
+/**
+ * 디렉토리 목록 캐시 초기화 (테스트용)
+ */
+export function clearDirectoryListingCache(): void {
+  directoryListingCache.clear();
+}
+
 export async function listMemoryFiles(
   workspaceDir: string,
   extraPaths?: string[],
 ): Promise<string[]> {
+  // 캐시 키 생성
+  const cacheKey = `${workspaceDir}:${extraPaths?.join(",") ?? ""}`;
+
+  // 캐시 유효성 검사 (mtime 기반)
+  if (await isCacheValid(cacheKey, workspaceDir, extraPaths)) {
+    const cached = directoryListingCache.get(cacheKey);
+    if (cached) {
+      return cached.files;
+    }
+  }
+
   const result: string[] = [];
   const memoryFile = path.join(workspaceDir, "MEMORY.md");
   const altMemoryFile = path.join(workspaceDir, "memory.md");
@@ -125,6 +234,9 @@ export async function listMemoryFiles(
     }
   }
   if (result.length <= 1) {
+    // 캐시에 저장 (mtime 기반 무효화)
+    const dirMtimes = await collectDirectoryMtimes(workspaceDir, extraPaths);
+    directoryListingCache.set(cacheKey, { files: result, dirMtimes });
     return result;
   }
   const seen = new Set<string>();
@@ -140,6 +252,11 @@ export async function listMemoryFiles(
     seen.add(key);
     deduped.push(entry);
   }
+
+  // 캐시에 저장 (mtime 기반 무효화)
+  const dirMtimes = await collectDirectoryMtimes(workspaceDir, extraPaths);
+  directoryListingCache.set(cacheKey, { files: deduped, dirMtimes });
+
   return deduped;
 }
 
