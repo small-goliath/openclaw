@@ -4,6 +4,7 @@ import type { BrowserRouteRegistrar } from "./routes/types.js";
 import { loadConfig } from "../config/config.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { safeEqualSecret } from "../security/secret-equal.js";
+import { securityHeadersMiddleware } from "../security/security-headers.js";
 import { resolveBrowserConfig, resolveProfile } from "./config.js";
 import { ensureBrowserControlAuth, resolveBrowserControlAuth } from "./control-auth.js";
 import { ensureChromeExtensionRelayServer } from "./extension-relay.js";
@@ -103,6 +104,11 @@ export async function startBrowserControlServerFromConfig(): Promise<BrowserServ
   }
 
   const app = express();
+
+  // Apply security headers to all responses (SEC-005)
+  // Applied before auth middleware so headers are present even on 401 responses
+  app.use(securityHeadersMiddleware({ secure: false }));
+
   app.use((req, res, next) => {
     const ctrl = new AbortController();
     const abort = () => ctrl.abort(new Error("request aborted"));

@@ -29,6 +29,7 @@ import {
   extractSessionId,
 } from "../security/csrf.js";
 import { safeEqualSecret } from "../security/secret-equal.js";
+import { applySecurityHeaders } from "../security/security-headers.js";
 import { handleSlackHttpRequest } from "../slack/http/index.js";
 import {
   authorizeGatewayConnect,
@@ -487,6 +488,11 @@ export function createGatewayHttpServer(opts: {
     if (String(req.headers.upgrade ?? "").toLowerCase() === "websocket") {
       return;
     }
+
+    // Apply security headers to all HTTP responses (SEC-005)
+    // This includes X-Content-Type-Options, X-Frame-Options, X-XSS-Protection,
+    // Content-Security-Policy, Referrer-Policy, and Permissions-Policy
+    applySecurityHeaders(res, { secure: opts.tlsOptions !== undefined });
 
     try {
       const configSnapshot = loadConfig();
