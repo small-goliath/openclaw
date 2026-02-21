@@ -28,6 +28,7 @@ import {
   normalizePath,
   pathForTab,
   tabFromPath,
+  titleForTab,
   type Tab,
 } from "./navigation.ts";
 import { saveSettings, type UiSettings } from "./storage.ts";
@@ -150,6 +151,8 @@ export function setTab(host: SettingsHost, next: Tab) {
   if (host.tab !== next) {
     host.tab = next;
   }
+  // 페이지 제목 업데이트 - 접근성 개선
+  updatePageTitle(next);
   if (next === "chat") {
     host.chatHasAutoScrolled = false;
   }
@@ -165,6 +168,19 @@ export function setTab(host: SettingsHost, next: Tab) {
   }
   void refreshActiveTab(host);
   syncUrlWithTab(host, next, false);
+}
+
+/**
+ * 페이지 제목을 업데이트합니다.
+ * 접근성을 위해 각 탭별 고유하고 의미 있는 제목을 제공합니다.
+ * @param tab - 현재 탭
+ */
+function updatePageTitle(tab: Tab) {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const tabTitle = titleForTab(tab);
+  document.title = `${tabTitle} | OpenClaw`;
 }
 
 export function setTheme(host: SettingsHost, next: ThemeMode, context?: ThemeTransitionContext) {
@@ -349,6 +365,8 @@ export function setTabFromRoute(host: SettingsHost, next: Tab) {
   if (host.tab !== next) {
     host.tab = next;
   }
+  // 페이지 제목 업데이트 - 접근성 개선
+  updatePageTitle(next);
   if (next === "chat") {
     host.chatHasAutoScrolled = false;
   }
