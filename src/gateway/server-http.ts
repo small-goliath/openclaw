@@ -1,5 +1,6 @@
 import type { TlsOptions } from "node:tls";
 import type { WebSocketServer } from "ws";
+import crypto from "node:crypto";
 import {
   createServer as createHttpServer,
   type Server as HttpServer,
@@ -19,6 +20,14 @@ import {
   handleA2uiHttpRequest,
 } from "../canvas-host/a2ui.js";
 import { loadConfig } from "../config/config.js";
+import {
+  type CsrfMiddlewareOptions,
+  csrfProtection,
+  getCsrfTokenFromCookie,
+  getOrCreateCsrfToken,
+  setCsrfCookie,
+  extractSessionId,
+} from "../security/csrf.js";
 import { safeEqualSecret } from "../security/secret-equal.js";
 import { handleSlackHttpRequest } from "../slack/http/index.js";
 import {
@@ -483,6 +492,79 @@ export function createGatewayHttpServer(opts: {
       const configSnapshot = loadConfig();
       const trustedProxies = configSnapshot.gateway?.trustedProxies ?? [];
       const requestPath = new URL(req.url ?? "/", "http://localhost").pathname;
+
+      // CSRF Protection (SEC-004, OWASP A01:2021)
+      // Apply CSRF protection to state-changing requests
+      const safeMethods = new Set(["GET", "HEAD", "OPTIONS", "TRACE"]);
+      const isSafeMethod = safeMethods.has(req.method ?? "GET");
+      const isExcludedPath =
+        requestPath.startsWith("/hooks/") ||
+        requestPath.startsWith("/api/channels/") ||
+        requestPath.startsWith("/v1/") || // OpenAI-compatible endpoints use API keys
+        requestPath.startsWith("/open-responses/"); // OpenResponses endpoints use API keys
+
+      // For safe methods, ensure CSRF cookie is set (Double Submit Cookie pattern)
+      if (isSafeMethod && !isExcludedPath) {
+        const existingToken = getCsrfTokenFromCookie(req);
+        if (!existingToken) {
+          const sessionId = extractSessionId(req);
+          const token = getOrCreateCsrfToken(sessionId);
+          const isSecure = opts.tlsOptions !== undefined;
+          setCsrfCookie(res, token, { secure: isSecure, sameSite: "strict" });
+        }
+      }
+
+      // For state-changing methods, validate CSRF token
+      if (!isSafeMethod && !isExcludedPath) {
+        const cookieToken = getCsrfTokenFromCookie(req);
+        if (!cookieToken) {
+          res.statusCode = 403;
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.end(
+            JSON.stringify({
+              error: "CSRF validation failed",
+              message: "CSRF cookie missing. Please refresh the page.",
+            }),
+          );
+          return;
+        }
+
+        // Get token from header or form body
+        const headerToken = req.headers["x-csrf-token"] as string | undefined;
+        const requestToken = headerToken ?? "";
+
+        // Validate using timing-safe comparison
+        try {
+          const cookieBuf = Buffer.from(cookieToken);
+          const requestBuf = Buffer.from(requestToken);
+
+          if (
+            cookieBuf.length !== requestBuf.length ||
+            !crypto.timingSafeEqual(cookieBuf, requestBuf)
+          ) {
+            res.statusCode = 403;
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            res.end(
+              JSON.stringify({
+                error: "CSRF validation failed",
+                message: "Invalid CSRF token.",
+              }),
+            );
+            return;
+          }
+        } catch {
+          res.statusCode = 403;
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.end(
+            JSON.stringify({
+              error: "CSRF validation failed",
+              message: "CSRF token validation error.",
+            }),
+          );
+          return;
+        }
+      }
+
       if (await handleHooksRequest(req, res)) {
         return;
       }

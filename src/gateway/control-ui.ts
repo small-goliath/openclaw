@@ -3,6 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveControlUiRootSync } from "../infra/control-ui-assets.js";
+import {
+  extractSessionId,
+  getOrCreateCsrfToken,
+  generateCsrfTokenScript,
+} from "../security/csrf.js";
 import { DEFAULT_ASSISTANT_IDENTITY, resolveAssistantIdentity } from "./assistant-identity.js";
 import {
   buildControlUiAvatarUrl,
@@ -164,11 +169,14 @@ interface ControlUiInjectionOpts {
   basePath: string;
   assistantName?: string;
   assistantAvatar?: string;
+  csrfToken?: string;
 }
 
 function injectControlUiConfig(html: string, opts: ControlUiInjectionOpts): string {
-  const { basePath, assistantName, assistantAvatar } = opts;
-  const script =
+  const { basePath, assistantName, assistantAvatar, csrfToken } = opts;
+
+  // Build configuration script
+  let configScript =
     `<script>` +
     `window.__OPENCLAW_CONTROL_UI_BASE_PATH__=${JSON.stringify(basePath)};` +
     `window.__OPENCLAW_ASSISTANT_NAME__=${JSON.stringify(
@@ -176,27 +184,39 @@ function injectControlUiConfig(html: string, opts: ControlUiInjectionOpts): stri
     )};` +
     `window.__OPENCLAW_ASSISTANT_AVATAR__=${JSON.stringify(
       assistantAvatar ?? DEFAULT_ASSISTANT_IDENTITY.avatar,
-    )};` +
-    `</script>`;
+    )};`;
+
+  // Add CSRF token if provided (SEC-004)
+  if (csrfToken) {
+    configScript += `window.__OPENCLAW_CSRF_TOKEN__=${JSON.stringify(csrfToken)};`;
+  }
+
+  configScript += `</script>`;
+
   // Check if already injected
   if (html.includes("__OPENCLAW_ASSISTANT_NAME__")) {
     return html;
   }
+
+  // Inject CSRF token retrieval script before config script
+  const csrfScript = generateCsrfTokenScript();
+
   const headClose = html.indexOf("</head>");
   if (headClose !== -1) {
-    return `${html.slice(0, headClose)}${script}${html.slice(headClose)}`;
+    return `${html.slice(0, headClose)}${csrfScript}${configScript}${html.slice(headClose)}`;
   }
-  return `${script}${html}`;
+  return `${csrfScript}${configScript}${html}`;
 }
 
 interface ServeIndexHtmlOpts {
   basePath: string;
   config?: OpenClawConfig;
   agentId?: string;
+  req?: IncomingMessage;
 }
 
 function serveIndexHtml(res: ServerResponse, indexPath: string, opts: ServeIndexHtmlOpts) {
-  const { basePath, config, agentId } = opts;
+  const { basePath, config, agentId, req } = opts;
   const identity = config
     ? resolveAssistantIdentity({ cfg: config, agentId })
     : DEFAULT_ASSISTANT_IDENTITY;
@@ -210,6 +230,14 @@ function serveIndexHtml(res: ServerResponse, indexPath: string, opts: ServeIndex
       agentId: resolvedAgentId,
       basePath,
     }) ?? identity.avatar;
+
+  // Generate CSRF token for the session (SEC-004)
+  let csrfToken: string | undefined;
+  if (req) {
+    const sessionId = extractSessionId(req);
+    csrfToken = getOrCreateCsrfToken(sessionId);
+  }
+
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache");
   const raw = fs.readFileSync(indexPath, "utf8");
@@ -218,6 +246,7 @@ function serveIndexHtml(res: ServerResponse, indexPath: string, opts: ServeIndex
       basePath,
       assistantName: identity.name,
       assistantAvatar: avatarValue,
+      csrfToken,
     }),
   );
 }
@@ -345,6 +374,7 @@ export function handleControlUiHttpRequest(
         basePath,
         config: opts?.config,
         agentId: opts?.agentId,
+        req,
       });
       return true;
     }
@@ -359,6 +389,7 @@ export function handleControlUiHttpRequest(
       basePath,
       config: opts?.config,
       agentId: opts?.agentId,
+      req,
     });
     return true;
   }
