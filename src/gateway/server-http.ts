@@ -19,6 +19,7 @@ import {
   CANVAS_WS_PATH,
   handleA2uiHttpRequest,
 } from "../canvas-host/a2ui.js";
+import { handleGdprApiRequest } from "../compliance/gdpr-api.js";
 import { loadConfig } from "../config/config.js";
 import {
   type CsrfMiddlewareOptions,
@@ -569,6 +570,17 @@ export function createGatewayHttpServer(opts: {
           );
           return;
         }
+      }
+
+      // GDPR API 엔드포인트 처리 (COMP-003, COMP-004)
+      if (
+        await handleGdprApiRequest(req, res, {
+          auth: resolvedAuth,
+          trustedProxies,
+          rateLimiter,
+        })
+      ) {
+        return;
       }
 
       if (await handleHooksRequest(req, res)) {
