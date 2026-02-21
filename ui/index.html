@@ -8,9 +8,27 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <style>
+      /* Skip navigation link for accessibility */
+      .skip-link {
+        position: absolute;
+        top: -40px;
+        left: 0;
+        background: #000;
+        color: #fff;
+        padding: 8px;
+        text-decoration: none;
+        z-index: 100;
+        transition: top 0.3s;
+      }
+      .skip-link:focus {
+        top: 0;
+      }
+    </style>
   </head>
   <body>
-    <openclaw-app></openclaw-app>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    <openclaw-app id="main-content"></openclaw-app>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

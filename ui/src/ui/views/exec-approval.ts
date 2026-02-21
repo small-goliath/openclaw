@@ -32,11 +32,11 @@ export function renderExecApprovalPrompt(state: AppViewState) {
   const remaining = remainingMs > 0 ? `expires in ${formatRemaining(remainingMs)}` : "expired";
   const queueCount = state.execApprovalQueue.length;
   return html`
-    <div class="exec-approval-overlay" role="dialog" aria-live="polite">
+    <div class="exec-approval-overlay" role="dialog" aria-modal="true" aria-labelledby="dialog-title" aria-live="polite">
       <div class="exec-approval-card">
         <div class="exec-approval-header">
           <div>
-            <div class="exec-approval-title">Exec approval needed</div>
+            <div class="exec-approval-title" id="dialog-title">Exec approval needed</div>
             <div class="exec-approval-sub">${remaining}</div>
           </div>
           ${

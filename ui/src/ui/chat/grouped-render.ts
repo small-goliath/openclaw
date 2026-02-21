@@ -65,6 +65,8 @@ export function renderReadingIndicatorGroup(assistant?: AssistantIdentity) {
             <span></span><span></span><span></span>
           </span>
         </div>
+        <!-- Screen reader announcement for reading indicator -->
+        <div class="sr-only" aria-live="polite" aria-atomic="true">AI is reading...</div>
       </div>
     </div>
   `;

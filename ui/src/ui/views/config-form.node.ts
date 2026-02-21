@@ -113,9 +113,10 @@ export function renderNode(params: {
   const key = pathKey(path);
 
   if (unsupported.has(key)) {
+    const errorId = `error-${key}`;
     return html`<div class="cfg-field cfg-field--error">
-      <div class="cfg-field__label">${label}</div>
-      <div class="cfg-field__error">Unsupported schema node. Use Raw mode.</div>
+      <div class="cfg-field__label" id="${errorId}">${label}</div>
+      <div class="cfg-field__error" aria-describedby="${errorId}">Unsupported schema node. Use Raw mode.</div>
     </div>`;
   }
 
@@ -283,10 +284,11 @@ export function renderNode(params: {
   }
 
   // Fallback
+  const fallbackErrorId = `error-${pathKey(path)}`;
   return html`
     <div class="cfg-field cfg-field--error">
-      <div class="cfg-field__label">${label}</div>
-      <div class="cfg-field__error">Unsupported type: ${type}. Use Raw mode.</div>
+      <div class="cfg-field__label" id="${fallbackErrorId}">${label}</div>
+      <div class="cfg-field__error" aria-describedby="${fallbackErrorId}">Unsupported type: ${type}. Use Raw mode.</div>
     </div>
   `;
 }
@@ -590,10 +592,11 @@ function renderArray(params: {
 
   const itemsSchema = Array.isArray(schema.items) ? schema.items[0] : schema.items;
   if (!itemsSchema) {
+    const errorId = `error-${pathKey(path)}`;
     return html`
       <div class="cfg-field cfg-field--error">
-        <div class="cfg-field__label">${label}</div>
-        <div class="cfg-field__error">Unsupported array schema. Use Raw mode.</div>
+        <div class="cfg-field__label" id="${errorId}">${label}</div>
+        <div class="cfg-field__error" aria-describedby="${errorId}">Unsupported array schema. Use Raw mode.</div>
       </div>
     `;
   }
