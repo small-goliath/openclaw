@@ -14,6 +14,10 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import crypto from "node:crypto";
+import { createSubsystemLogger } from "../logging/subsystem.js";
+import { type CsrfTokenStore, createCsrfStoreFromEnv, MemoryCsrfStore } from "./csrf-store.js";
+
+const log = createSubsystemLogger("security/csrf");
 
 /** CSRF token cookie name */
 export const CSRF_COOKIE_NAME = "XSRF-TOKEN";
@@ -30,8 +34,9 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS", "TRACE"]);
 /** Token length in bytes */
 const TOKEN_LENGTH = 32;
 
-/** CSRF token storage (in production, use Redis or session store) */
-const tokenStore = new Map<string, { token: string; expiresAt: number }>();
+/** CSRF token storage - defaults to memory, can be configured for persistence */
+let tokenStore: CsrfTokenStore = new MemoryCsrfStore();
+let storeInitialized = false;
 
 /** Token expiration time (24 hours) */
 const TOKEN_EXPIRY_MS = 24 * 60 * 60 * 1000;
@@ -52,14 +57,17 @@ export function generateCsrfToken(): string {
  * @param sessionId - Unique session identifier
  * @returns CSRF token string
  */
-export function getOrCreateCsrfToken(sessionId: string): string {
-  const existing = tokenStore.get(sessionId);
-  if (existing && existing.expiresAt > Date.now()) {
+export async function getOrCreateCsrfToken(sessionId: string): Promise<string> {
+  await ensureStoreInitialized();
+
+  const existing = await tokenStore.get(sessionId);
+  if (existing) {
     return existing.token;
   }
 
   const token = generateCsrfToken();
-  tokenStore.set(sessionId, {
+  await tokenStore.set({
+    sessionId,
     token,
     expiresAt: Date.now() + TOKEN_EXPIRY_MS,
   });
@@ -73,49 +81,54 @@ export function getOrCreateCsrfToken(sessionId: string): string {
  * @param token - Token to validate
  * @returns true if valid, false otherwise
  */
-export function validateCsrfToken(sessionId: string, token: string): boolean {
-  const stored = tokenStore.get(sessionId);
-  if (!stored || stored.expiresAt <= Date.now()) {
-    return false;
-  }
-
-  // Use timing-safe comparison to prevent timing attacks
-  try {
-    const storedBuf = Buffer.from(stored.token);
-    const providedBuf = Buffer.from(token);
-
-    if (storedBuf.length !== providedBuf.length) {
-      return false;
-    }
-
-    return crypto.timingSafeEqual(storedBuf, providedBuf);
-  } catch {
-    return false;
-  }
+export async function validateCsrfToken(sessionId: string, token: string): Promise<boolean> {
+  await ensureStoreInitialized();
+  return tokenStore.validate(sessionId, token);
 }
 
 /**
  * Clear CSRF token for a session (logout)
  * @param sessionId - Unique session identifier
  */
-export function clearCsrfToken(sessionId: string): void {
-  tokenStore.delete(sessionId);
+export async function clearCsrfToken(sessionId: string): Promise<void> {
+  await ensureStoreInitialized();
+  await tokenStore.delete(sessionId);
 }
 
 /**
  * Clean up expired tokens (should be called periodically)
  */
-export function cleanupExpiredTokens(): void {
-  const now = Date.now();
-  for (const [sessionId, data] of tokenStore.entries()) {
-    if (data.expiresAt <= now) {
-      tokenStore.delete(sessionId);
-    }
+export async function cleanupExpiredTokens(): Promise<number> {
+  await ensureStoreInitialized();
+  return tokenStore.cleanup();
+}
+
+/**
+ * Ensure the token store is initialized
+ * Initializes from environment on first call
+ */
+async function ensureStoreInitialized(): Promise<void> {
+  if (storeInitialized) {
+    return;
+  }
+
+  try {
+    tokenStore = await createCsrfStoreFromEnv();
+    storeInitialized = true;
+    log.info(`CSRF token store initialized: ${tokenStore.name}`);
+  } catch (err) {
+    log.error("Failed to initialize CSRF token store, using memory fallback", { err });
+    tokenStore = new MemoryCsrfStore();
+    storeInitialized = true;
   }
 }
 
 // Start periodic cleanup
-setInterval(cleanupExpiredTokens, CLEANUP_INTERVAL_MS);
+setInterval(() => {
+  cleanupExpiredTokens().catch((err) => {
+    log.error("CSRF token cleanup failed", { err });
+  });
+}, CLEANUP_INTERVAL_MS);
 
 /**
  * Extract session ID from request (using IP + User-Agent hash as fallback)
@@ -251,11 +264,15 @@ export type CsrfValidationResult = { valid: true } | { valid: false; reason: str
  * @param req - HTTP request
  * @returns Validation result
  */
-export function validateCsrfTokenFromRequest(req: IncomingMessage): CsrfValidationResult {
+export async function validateCsrfTokenFromRequest(
+  req: IncomingMessage,
+): Promise<CsrfValidationResult> {
   // Safe methods don't require CSRF protection
   if (SAFE_METHODS.has(req.method ?? "GET")) {
     return { valid: true };
   }
+
+  await ensureStoreInitialized();
 
   const cookieToken = getCsrfTokenFromCookie(req);
   if (!cookieToken) {
@@ -306,7 +323,7 @@ export interface CsrfMiddlewareOptions {
 export function csrfProtection(options: CsrfMiddlewareOptions = {}) {
   const { excludedPaths = [], secure = false, sameSite = "strict", onError } = options;
 
-  return (req: IncomingMessage, res: ServerResponse, next: () => void): void => {
+  return async (req: IncomingMessage, res: ServerResponse, next: () => void): Promise<void> => {
     const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
 
     // Check if path is excluded
@@ -315,12 +332,15 @@ export function csrfProtection(options: CsrfMiddlewareOptions = {}) {
       return;
     }
 
+    // Ensure store is initialized
+    await ensureStoreInitialized();
+
     // Safe methods: set cookie if not present
     if (SAFE_METHODS.has(req.method ?? "GET")) {
       const existingToken = getCsrfTokenFromCookie(req);
       if (!existingToken) {
         const sessionId = extractSessionId(req);
-        const token = getOrCreateCsrfToken(sessionId);
+        const token = await getOrCreateCsrfToken(sessionId);
         setCsrfCookie(res, token, { secure, sameSite });
       }
       next();
@@ -328,7 +348,7 @@ export function csrfProtection(options: CsrfMiddlewareOptions = {}) {
     }
 
     // State-changing methods: validate token
-    const validation = validateCsrfTokenFromRequest(req);
+    const validation = await validateCsrfTokenFromRequest(req);
 
     if (!validation.valid) {
       if (onError) {
@@ -381,6 +401,25 @@ export function generateCsrfTokenScript(): string {
  * @param text - Text to escape
  * @returns Escaped text
  */
+/**
+ * Configure the CSRF token store
+ * Use this to set a custom store (e.g., Redis for distributed deployments)
+ * @param store - CSRF token store implementation
+ */
+export function configureCsrfStore(store: CsrfTokenStore): void {
+  tokenStore = store;
+  storeInitialized = true;
+  log.info(`CSRF token store configured: ${store.name}`);
+}
+
+/**
+ * Get the current CSRF token store (for testing/monitoring)
+ * @returns Current token store
+ */
+export function getCsrfTokenStore(): CsrfTokenStore {
+  return tokenStore;
+}
+
 function escapeHtml(text: string): string {
   const div = typeof document !== "undefined" ? document.createElement("div") : null;
   if (div) {

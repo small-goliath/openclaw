@@ -113,10 +113,18 @@ export function renderNode(params: {
   const key = pathKey(path);
 
   if (unsupported.has(key)) {
+    const fieldId = `field-${key}`;
     const errorId = `error-${key}`;
-    return html`<div class="cfg-field cfg-field--error">
-      <div class="cfg-field__label" id="${errorId}">${label}</div>
-      <div class="cfg-field__error" aria-describedby="${errorId}">Unsupported schema node. Use Raw mode.</div>
+    return html`<div class="cfg-field cfg-field--error" role="alert" aria-live="polite">
+      <div class="cfg-field__label" id="${fieldId}">${label}</div>
+      <div
+        class="cfg-field__error"
+        id="${errorId}"
+        aria-describedby="${fieldId}"
+      >
+        <strong>Configuration Error:</strong> This field uses an unsupported schema type.
+        <span class="cfg-field__error-help">To fix this issue, switch to "Raw JSON" mode and edit the configuration manually.</span>
+      </div>
     </div>`;
   }
 
@@ -283,12 +291,20 @@ export function renderNode(params: {
     return renderTextInput({ ...params, inputType: "text" });
   }
 
-  // Fallback
-  const fallbackErrorId = `error-${pathKey(path)}`;
+  // Fallback for unsupported types
+  const fieldId = `field-${pathKey(path)}`;
+  const errorId = `error-${pathKey(path)}`;
   return html`
-    <div class="cfg-field cfg-field--error">
-      <div class="cfg-field__label" id="${fallbackErrorId}">${label}</div>
-      <div class="cfg-field__error" aria-describedby="${fallbackErrorId}">Unsupported type: ${type}. Use Raw mode.</div>
+    <div class="cfg-field cfg-field--error" role="alert" aria-live="polite">
+      <div class="cfg-field__label" id="${fieldId}">${label}</div>
+      <div
+        class="cfg-field__error"
+        id="${errorId}"
+        aria-describedby="${fieldId}"
+      >
+        <strong>Unsupported Field Type:</strong> The field type "${type}" is not supported by the form builder.
+        <span class="cfg-field__error-help">To resolve this, switch to "Raw JSON" mode to edit this configuration directly.</span>
+      </div>
     </div>
   `;
 }
@@ -323,10 +339,22 @@ function renderTextInput(params: {
   const labelId = `label-${pathKey(path)}`;
   const helpId = help ? `help-${pathKey(path)}` : undefined;
 
+  // Validation state for accessibility
+  const hasError = false; // TODO: Pass error state from parent
+  const errorId = hasError ? `error-${pathKey(path)}` : undefined;
+  const describedBy = [helpId, errorId].filter(Boolean).join(" ") || nothing;
+
   return html`
-    <div class="cfg-field">
+    <div class="cfg-field ${hasError ? "cfg-field--error" : ""}">
       ${showLabel ? html`<label class="cfg-field__label" id="${labelId}" for="${fieldId}">${label}</label>` : nothing}
       ${help ? html`<div class="cfg-field__help" id="${helpId}">${help}</div>` : nothing}
+      ${
+        hasError
+          ? html`<div class="cfg-field__error" id="${errorId}" role="alert" aria-live="polite">
+        <strong>Invalid value:</strong> Please enter a valid ${inputType === "number" ? "number" : "text"}.
+      </div>`
+          : nothing
+      }
       <div class="cfg-input-wrap">
         <input
           id="${fieldId}"
@@ -336,7 +364,8 @@ function renderTextInput(params: {
           .value=${displayValue == null ? "" : String(displayValue)}
           ?disabled=${disabled}
           aria-labelledby="${labelId}"
-          aria-describedby="${helpId ?? nothing}"
+          aria-describedby="${describedBy}"
+          aria-invalid="${hasError ? "true" : "false"}"
           @input=${(e: Event) => {
             const raw = (e.target as HTMLInputElement).value;
             if (inputType === "number") {
@@ -396,10 +425,22 @@ function renderNumberInput(params: {
   const labelId = `label-${pathKey(path)}`;
   const helpId = help ? `help-${pathKey(path)}` : undefined;
 
+  // Validation state for accessibility
+  const hasError = false; // TODO: Pass error state from parent
+  const errorId = hasError ? `error-${pathKey(path)}` : undefined;
+  const describedBy = [helpId, errorId].filter(Boolean).join(" ") || nothing;
+
   return html`
-    <div class="cfg-field">
+    <div class="cfg-field ${hasError ? "cfg-field--error" : ""}">
       ${showLabel ? html`<label class="cfg-field__label" id="${labelId}" for="${fieldId}">${label}</label>` : nothing}
       ${help ? html`<div class="cfg-field__help" id="${helpId}">${help}</div>` : nothing}
+      ${
+        hasError
+          ? html`<div class="cfg-field__error" id="${errorId}" role="alert" aria-live="polite">
+        <strong>Invalid number:</strong> Please enter a valid number${schema.minimum !== undefined ? ` (minimum: ${schema.minimum})` : ""}${schema.maximum !== undefined ? ` (maximum: ${schema.maximum})` : ""}.
+      </div>`
+          : nothing
+      }
       <div class="cfg-number">
         <button
           type="button"
@@ -415,7 +456,8 @@ function renderNumberInput(params: {
           .value=${displayValue == null ? "" : String(displayValue)}
           ?disabled=${disabled}
           aria-labelledby="${labelId}"
-          aria-describedby="${helpId ?? nothing}"
+          aria-describedby="${describedBy}"
+          aria-invalid="${hasError ? "true" : "false"}"
           @input=${(e: Event) => {
             const raw = (e.target as HTMLInputElement).value;
             const parsed = raw === "" ? undefined : Number(raw);
@@ -458,17 +500,30 @@ function renderSelect(params: {
   const labelId = `label-${pathKey(path)}`;
   const helpId = help ? `help-${pathKey(path)}` : undefined;
 
+  // Validation state for accessibility
+  const hasError = false; // TODO: Pass error state from parent
+  const errorId = hasError ? `error-${pathKey(path)}` : undefined;
+  const describedBy = [helpId, errorId].filter(Boolean).join(" ") || nothing;
+
   return html`
-    <div class="cfg-field">
+    <div class="cfg-field ${hasError ? "cfg-field--error" : ""}">
       ${showLabel ? html`<label class="cfg-field__label" id="${labelId}" for="${fieldId}">${label}</label>` : nothing}
       ${help ? html`<div class="cfg-field__help" id="${helpId}">${help}</div>` : nothing}
+      ${
+        hasError
+          ? html`<div class="cfg-field__error" id="${errorId}" role="alert" aria-live="polite">
+        <strong>Selection required:</strong> Please select a valid option from the list.
+      </div>`
+          : nothing
+      }
       <select
         id="${fieldId}"
         class="cfg-select"
         ?disabled=${disabled}
         .value=${currentIndex >= 0 ? String(currentIndex) : unset}
         aria-labelledby="${labelId}"
-        aria-describedby="${helpId ?? nothing}"
+        aria-describedby="${describedBy}"
+        aria-invalid="${hasError ? "true" : "false"}"
         @change=${(e: Event) => {
           const val = (e.target as HTMLSelectElement).value;
           onPatch(path, val === unset ? undefined : options[Number(val)]);
@@ -612,11 +667,19 @@ function renderArray(params: {
 
   const itemsSchema = Array.isArray(schema.items) ? schema.items[0] : schema.items;
   if (!itemsSchema) {
+    const fieldId = `field-${pathKey(path)}`;
     const errorId = `error-${pathKey(path)}`;
     return html`
-      <div class="cfg-field cfg-field--error">
-        <div class="cfg-field__label" id="${errorId}">${label}</div>
-        <div class="cfg-field__error" aria-describedby="${errorId}">Unsupported array schema. Use Raw mode.</div>
+      <div class="cfg-field cfg-field--error" role="alert" aria-live="polite">
+        <div class="cfg-field__label" id="${fieldId}">${label}</div>
+        <div
+          class="cfg-field__error"
+          id="${errorId}"
+          aria-describedby="${fieldId}"
+        >
+          <strong>Array Configuration Error:</strong> This array field has an unsupported or missing item schema.
+          <span class="cfg-field__error-help">Please define the item schema in your configuration or switch to "Raw JSON" mode.</span>
+        </div>
       </div>
     `;
   }
