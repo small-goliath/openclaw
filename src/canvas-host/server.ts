@@ -110,11 +110,13 @@ function defaultIndexHTML() {
         typeof window.openclawCanvasA2UIAction.postMessage === "function")
     );
   const hasHelper = () => typeof window.openclawSendUserAction === "function";
-  statusEl.innerHTML =
-    "Bridge: " +
-    (hasHelper() ? "<span class='ok'>ready</span>" : "<span class='bad'>missing</span>") +
-    " · iOS=" + (hasIOS() ? "yes" : "no") +
-    " · Android=" + (hasAndroid() ? "yes" : "no");
+  // 보안: innerHTML 대신 textContent 사용하여 XSS 방지
+  const bridgeStatus = hasHelper() ? "ready" : "missing";
+  const iosStatus = hasIOS() ? "yes" : "no";
+  const androidStatus = hasAndroid() ? "yes" : "no";
+  statusEl.textContent = `Bridge: ${bridgeStatus} · iOS=${iosStatus} · Android=${androidStatus}`;
+  // 상태에 따른 스타일 클래스 적용
+  statusEl.className = hasHelper() ? "ok" : "bad";
 
   const onStatus = (ev) => {
     const d = ev && ev.detail || {};

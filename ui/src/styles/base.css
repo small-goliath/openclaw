@@ -26,12 +26,12 @@
   --text: #e4e4e7;
   --text-strong: #fafafa;
   --chat-text: #e4e4e7;
-  --muted: #71717a;
-  --muted-strong: #52525b;
-  --muted-foreground: #71717a;
+  --muted: #a1a1aa;
+  --muted-strong: #8a8a95;
+  --muted-foreground: #a1a1aa;
 
   /* Border - Subtle but defined */
-  --border: #27272a;
+  --border: #3f3f46;
   --border-strong: #3f3f46;
   --border-hover: #52525b;
   --input: #27272a;

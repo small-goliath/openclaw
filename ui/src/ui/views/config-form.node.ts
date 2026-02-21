@@ -319,18 +319,24 @@ function renderTextInput(params: {
         ? `Default: ${String(schema.default)}`
         : "");
   const displayValue = value ?? "";
+  const fieldId = `field-${pathKey(path)}`;
+  const labelId = `label-${pathKey(path)}`;
+  const helpId = help ? `help-${pathKey(path)}` : undefined;
 
   return html`
     <div class="cfg-field">
-      ${showLabel ? html`<label class="cfg-field__label">${label}</label>` : nothing}
-      ${help ? html`<div class="cfg-field__help">${help}</div>` : nothing}
+      ${showLabel ? html`<label class="cfg-field__label" id="${labelId}" for="${fieldId}">${label}</label>` : nothing}
+      ${help ? html`<div class="cfg-field__help" id="${helpId}">${help}</div>` : nothing}
       <div class="cfg-input-wrap">
         <input
+          id="${fieldId}"
           type=${isSensitive ? "password" : inputType}
           class="cfg-input"
           placeholder=${placeholder}
           .value=${displayValue == null ? "" : String(displayValue)}
           ?disabled=${disabled}
+          aria-labelledby="${labelId}"
+          aria-describedby="${helpId ?? nothing}"
           @input=${(e: Event) => {
             const raw = (e.target as HTMLInputElement).value;
             if (inputType === "number") {
@@ -386,23 +392,30 @@ function renderNumberInput(params: {
   const help = hint?.help ?? schema.description;
   const displayValue = value ?? schema.default ?? "";
   const numValue = typeof displayValue === "number" ? displayValue : 0;
+  const fieldId = `field-${pathKey(path)}`;
+  const labelId = `label-${pathKey(path)}`;
+  const helpId = help ? `help-${pathKey(path)}` : undefined;
 
   return html`
     <div class="cfg-field">
-      ${showLabel ? html`<label class="cfg-field__label">${label}</label>` : nothing}
-      ${help ? html`<div class="cfg-field__help">${help}</div>` : nothing}
+      ${showLabel ? html`<label class="cfg-field__label" id="${labelId}" for="${fieldId}">${label}</label>` : nothing}
+      ${help ? html`<div class="cfg-field__help" id="${helpId}">${help}</div>` : nothing}
       <div class="cfg-number">
         <button
           type="button"
           class="cfg-number__btn"
           ?disabled=${disabled}
           @click=${() => onPatch(path, numValue - 1)}
+          aria-label="Decrease ${label}"
         >−</button>
         <input
+          id="${fieldId}"
           type="number"
           class="cfg-number__input"
           .value=${displayValue == null ? "" : String(displayValue)}
           ?disabled=${disabled}
+          aria-labelledby="${labelId}"
+          aria-describedby="${helpId ?? nothing}"
           @input=${(e: Event) => {
             const raw = (e.target as HTMLInputElement).value;
             const parsed = raw === "" ? undefined : Number(raw);
@@ -414,6 +427,7 @@ function renderNumberInput(params: {
           class="cfg-number__btn"
           ?disabled=${disabled}
           @click=${() => onPatch(path, numValue + 1)}
+          aria-label="Increase ${label}"
         >+</button>
       </div>
     </div>
@@ -440,15 +454,21 @@ function renderSelect(params: {
     (opt) => opt === resolvedValue || String(opt) === String(resolvedValue),
   );
   const unset = "__unset__";
+  const fieldId = `field-${pathKey(path)}`;
+  const labelId = `label-${pathKey(path)}`;
+  const helpId = help ? `help-${pathKey(path)}` : undefined;
 
   return html`
     <div class="cfg-field">
-      ${showLabel ? html`<label class="cfg-field__label">${label}</label>` : nothing}
-      ${help ? html`<div class="cfg-field__help">${help}</div>` : nothing}
+      ${showLabel ? html`<label class="cfg-field__label" id="${labelId}" for="${fieldId}">${label}</label>` : nothing}
+      ${help ? html`<div class="cfg-field__help" id="${helpId}">${help}</div>` : nothing}
       <select
+        id="${fieldId}"
         class="cfg-select"
         ?disabled=${disabled}
         .value=${currentIndex >= 0 ? String(currentIndex) : unset}
+        aria-labelledby="${labelId}"
+        aria-describedby="${helpId ?? nothing}"
         @change=${(e: Event) => {
           const val = (e.target as HTMLSelectElement).value;
           onPatch(path, val === unset ? undefined : options[Number(val)]);
