@@ -6,6 +6,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import crypto from "node:crypto";
 import { safeEqualSecret } from "../security/secret-equal.js";
+import { logSecurityEvent } from "../security/siem-logger.js";
+
+/**
+ * 활성 세션 추적 (세션 고정 방어용)
+ * 실제 구현에서는 Redis나 데이터베이스 사용 권장
+ */
+const activeSessions = new Map<string, { userId: string; createdAt: number }>();
 
 /**
  * JWT 토큰 페이로드
@@ -31,16 +38,25 @@ interface CookieOptions {
 
 /**
  * JWT 비밀 키 (환경 변수에서 로드)
+ * 개발 환경에서도 랜덤 키를 생성하여 보안 취약점 방지
  */
 function getJwtSecret(): string {
   const secret = process.env.OPENCLAW_JWT_SECRET;
   if (!secret) {
-    // 개발 환경에서만 기본값 사용
-    if (process.env.NODE_ENV === "development") {
-      return "dev-secret-do-not-use-in-production";
+    // 프로덕션 환경에서는 필수 환경 변수 검증 강화
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("OPENCLAW_JWT_SECRET environment variable is required in production");
     }
-    throw new Error("OPENCLAW_JWT_SECRET environment variable is required");
+    // 개발 환경에서도 랜덤 키 생성 (고정된 키 사용 방지)
+    // 프로세스 재시작 시 새로운 키가 생성됨
+    return crypto.randomBytes(32).toString("hex");
   }
+
+  // 키 길이 검증 (최소 32바이트 = 256비트)
+  if (secret.length < 32) {
+    throw new Error("OPENCLAW_JWT_SECRET must be at least 32 characters for security");
+  }
+
   return secret;
 }
 
@@ -72,6 +88,7 @@ export function generateToken(
 
 /**
  * JWT 토큰 검증
+ * 세션 고정 방어를 위해 세션 유효성도 검증
  */
 export function verifyToken(token: string): TokenPayload | null {
   try {
@@ -97,6 +114,18 @@ export function verifyToken(token: string): TokenPayload | null {
     // 만료 확인
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp < now) {
+      return null;
+    }
+
+    // 세션 유효성 확인 (세션 고정 방어)
+    if (!isSessionValid(payload.sessionId)) {
+      logSecurityEvent({
+        type: "session_validation_failed",
+        sessionId: payload.sessionId,
+        userId: payload.userId,
+        reason: "session_invalidated_or_expired",
+        timestamp: Date.now(),
+      });
       return null;
     }
 
@@ -178,6 +207,72 @@ export function clearCookie(res: ServerResponse, name: string, path = "/"): void
   } else {
     res.setHeader("Set-Cookie", cookieValue);
   }
+}
+
+/**
+ * 세션 무효화 (로그아웃 또는 세션 고정 방어용)
+ */
+export async function invalidateSession(sessionId: string): Promise<void> {
+  const session = activeSessions.get(sessionId);
+  if (session) {
+    // 세션 무효화 로깅
+    await logSecurityEvent({
+      type: "session_invalidated",
+      sessionId,
+      userId: session.userId,
+      reason: "session_rotation",
+      timestamp: Date.now(),
+    });
+    activeSessions.delete(sessionId);
+  }
+}
+
+/**
+ * 세션 회전 (세션 고정 방어)
+ * 로그인 성공 시 새 세션 ID를 생성하고 기존 세션을 무효화
+ */
+export async function rotateSession(
+  res: ServerResponse,
+  oldSessionId: string | null,
+  userId: string,
+): Promise<{ accessToken: string; refreshToken: string; newSessionId: string }> {
+  // 새 세션 ID 생성
+  const newSessionId = crypto.randomUUID();
+
+  // 기존 세션 무효화
+  if (oldSessionId) {
+    await invalidateSession(oldSessionId);
+  }
+
+  // 새 세션 등록
+  activeSessions.set(newSessionId, {
+    userId,
+    createdAt: Date.now(),
+  });
+
+  // 새 토큰 발급
+  const tokens = issueTokens(res, userId, newSessionId);
+
+  // 세션 생성 로깅
+  await logSecurityEvent({
+    type: "session_created",
+    sessionId: newSessionId,
+    userId,
+    rotatedFrom: oldSessionId,
+    timestamp: Date.now(),
+  });
+
+  return {
+    ...tokens,
+    newSessionId,
+  };
+}
+
+/**
+ * 세션 유효성 확인
+ */
+export function isSessionValid(sessionId: string): boolean {
+  return activeSessions.has(sessionId);
 }
 
 /**
