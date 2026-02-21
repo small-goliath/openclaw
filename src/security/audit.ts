@@ -32,6 +32,8 @@ import {
   formatPermissionRemediation,
   inspectPathPermissions,
 } from "./audit-fs.js";
+import { createSecurityAuditFindingEvent, type SecuritySeverity } from "./security-events.js";
+import { logSecurityEvent, alertCriticalEvent } from "./siem-logger.js";
 
 export type SecurityAuditSeverity = "info" | "warn" | "critical";
 
@@ -633,6 +635,79 @@ export async function runSecurityAudit(opts: SecurityAuditOptions): Promise<Secu
     });
   }
 
+  // SIEM으로 보안 이벤트 전송 (critical 및 high findings)
+  await sendFindingsToSiem(findings);
+
   const summary = countBySeverity(findings);
   return { ts: Date.now(), summary, findings, deep };
+}
+
+/**
+ * 보안 감사 발견 사항을 SIEM으로 전송
+ * Critical 및 High 심각도의 발견 사항만 전송합니다.
+ *
+ * @param findings 보안 감사 발견 사항 목록
+ */
+async function sendFindingsToSiem(findings: SecurityAuditFinding[]): Promise<void> {
+  const findingsToSend = findings.filter((f) => f.severity === "critical" || f.severity === "warn");
+
+  if (findingsToSend.length === 0) {
+    return;
+  }
+
+  for (const finding of findingsToSend) {
+    const event = createSecurityAuditFindingEvent(
+      {
+        checkId: finding.checkId,
+        severity: mapAuditSeverityToSiemSeverity(finding.severity),
+        title: finding.title,
+        detail: finding.detail,
+        remediation: finding.remediation,
+        category: extractCategoryFromCheckId(finding.checkId),
+      },
+      {
+        component: "security-audit",
+        tags: ["audit", "security", finding.severity],
+      },
+    );
+
+    try {
+      if (finding.severity === "critical") {
+        // Critical 이벤트는 즉시 알림
+        await alertCriticalEvent(event);
+      } else {
+        // Warn 이벤트는 일반 로깅
+        await logSecurityEvent(event);
+      }
+    } catch (err) {
+      // SIEM 전송 실패는 audit 자체를 실패시키지 않음
+      console.error(`Failed to send finding to SIEM: ${err}`);
+    }
+  }
+}
+
+/**
+ * Audit 심각도를 SIEM 심각도로 매핑
+ */
+function mapAuditSeverityToSiemSeverity(auditSeverity: SecurityAuditSeverity): SecuritySeverity {
+  switch (auditSeverity) {
+    case "critical":
+      return "critical";
+    case "warn":
+      return "high";
+    case "info":
+    default:
+      return "info";
+  }
+}
+
+/**
+ * Check ID에서 카테고리 추출
+ */
+function extractCategoryFromCheckId(checkId: string): string {
+  const parts = checkId.split(".");
+  if (parts.length >= 2) {
+    return parts[1] ?? "general";
+  }
+  return "general";
 }
