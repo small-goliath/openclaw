@@ -117,11 +117,11 @@ describe("listMemoryFiles", () => {
 });
 
 describe("chunkMarkdown", () => {
-  it("splits overly long lines into max-sized chunks", () => {
+  it("splits overly long lines into max-sized chunks", async () => {
     const chunkTokens = 400;
     const maxChars = chunkTokens * 4;
     const content = "a".repeat(maxChars * 3 + 25);
-    const chunks = chunkMarkdown(content, { tokens: chunkTokens, overlap: 0 });
+    const chunks = await chunkMarkdown(content, { tokens: chunkTokens, overlap: 0 });
     expect(chunks.length).toBeGreaterThan(1);
     for (const chunk of chunks) {
       expect(chunk.text.length).toBeLessThanOrEqual(maxChars);
@@ -130,13 +130,13 @@ describe("chunkMarkdown", () => {
 });
 
 describe("remapChunkLines", () => {
-  it("remaps chunk line numbers using a lineMap", () => {
+  it("remaps chunk line numbers using a lineMap", async () => {
     // Simulate 5 content lines that came from JSONL lines [4, 6, 7, 10, 13] (1-indexed)
     const lineMap = [4, 6, 7, 10, 13];
 
     // Create chunks from content that has 5 lines
     const content = "User: Hello\nAssistant: Hi\nUser: Question\nAssistant: Answer\nUser: Thanks";
-    const chunks = chunkMarkdown(content, { tokens: 400, overlap: 0 });
+    const chunks = await chunkMarkdown(content, { tokens: 400, overlap: 0 });
     expect(chunks.length).toBeGreaterThan(0);
 
     // Before remapping, startLine/endLine reference content line numbers (1-indexed)
@@ -152,9 +152,9 @@ describe("remapChunkLines", () => {
     expect(lastChunk.endLine).toBe(13);
   });
 
-  it("preserves original line numbers when lineMap is undefined", () => {
+  it("preserves original line numbers when lineMap is undefined", async () => {
     const content = "Line one\nLine two\nLine three";
-    const chunks = chunkMarkdown(content, { tokens: 400, overlap: 0 });
+    const chunks = await chunkMarkdown(content, { tokens: 400, overlap: 0 });
     const originalStart = chunks[0].startLine;
     const originalEnd = chunks[chunks.length - 1].endLine;
 
@@ -164,7 +164,7 @@ describe("remapChunkLines", () => {
     expect(chunks[chunks.length - 1].endLine).toBe(originalEnd);
   });
 
-  it("handles multi-chunk content with correct remapping", () => {
+  it("handles multi-chunk content with correct remapping", async () => {
     // Use small chunk size to force multiple chunks
     // lineMap: 10 content lines from JSONL lines [2, 5, 8, 11, 14, 17, 20, 23, 26, 29]
     const lineMap = [2, 5, 8, 11, 14, 17, 20, 23, 26, 29];
@@ -174,7 +174,7 @@ describe("remapChunkLines", () => {
     const content = contentLines.join("\n");
 
     // Use very small chunk size to force splitting
-    const chunks = chunkMarkdown(content, { tokens: 10, overlap: 0 });
+    const chunks = await chunkMarkdown(content, { tokens: 10, overlap: 0 });
     expect(chunks.length).toBeGreaterThan(1);
 
     remapChunkLines(chunks, lineMap);

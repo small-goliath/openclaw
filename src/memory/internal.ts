@@ -1,7 +1,7 @@
-import crypto from "node:crypto";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { hashText as workerHashText } from "../workers/index.js";
 
 export type MemoryFileEntry = {
   path: string;
@@ -143,8 +143,12 @@ export async function listMemoryFiles(
   return deduped;
 }
 
-export function hashText(value: string): string {
-  return crypto.createHash("sha256").update(value).digest("hex");
+/**
+ * SHA256 해싱 수행 (Worker Thread 사용)
+ * PERF-005: 동기식 해싱을 Worker Thread로 이동하여 event loop blocking 방지
+ */
+export async function hashText(value: string): Promise<string> {
+  return workerHashText(value, "sha256");
 }
 
 export async function buildFileEntry(
@@ -153,7 +157,8 @@ export async function buildFileEntry(
 ): Promise<MemoryFileEntry> {
   const stat = await fs.stat(absPath);
   const content = await fs.readFile(absPath, "utf-8");
-  const hash = hashText(content);
+  // PERF-005: Worker Thread를 사용한 비동기 해싱
+  const hash = await hashText(content);
   return {
     path: path.relative(workspaceDir, absPath).replace(/\\/g, "/"),
     absPath,
@@ -163,10 +168,14 @@ export async function buildFileEntry(
   };
 }
 
-export function chunkMarkdown(
+/**
+ * Markdown 콘텐츠를 청크로 분할
+ * PERF-005: 비동기 해싱을 위해 async 함수로 변경
+ */
+export async function chunkMarkdown(
   content: string,
   chunking: { tokens: number; overlap: number },
-): MemoryChunk[] {
+): Promise<MemoryChunk[]> {
   const lines = content.split("\n");
   if (lines.length === 0) {
     return [];
@@ -174,11 +183,12 @@ export function chunkMarkdown(
   const maxChars = Math.max(32, chunking.tokens * 4);
   const overlapChars = Math.max(0, chunking.overlap * 4);
   const chunks: MemoryChunk[] = [];
+  const pendingHashes: Array<{ index: number; text: string }> = [];
 
   let current: Array<{ line: string; lineNo: number }> = [];
   let currentChars = 0;
 
-  const flush = () => {
+  const flush = async () => {
     if (current.length === 0) {
       return;
     }
@@ -190,12 +200,14 @@ export function chunkMarkdown(
     const text = current.map((entry) => entry.line).join("\n");
     const startLine = firstEntry.lineNo;
     const endLine = lastEntry.lineNo;
+    const chunkIndex = chunks.length;
     chunks.push({
       startLine,
       endLine,
       text,
-      hash: hashText(text),
+      hash: "", // 임시 값, 나중에 업데이트
     });
+    pendingHashes.push({ index: chunkIndex, text });
   };
 
   const carryOverlap = () => {
@@ -235,14 +247,21 @@ export function chunkMarkdown(
     for (const segment of segments) {
       const lineSize = segment.length + 1;
       if (currentChars + lineSize > maxChars && current.length > 0) {
-        flush();
+        await flush();
         carryOverlap();
       }
       current.push({ line: segment, lineNo });
       currentChars += lineSize;
     }
   }
-  flush();
+  await flush();
+
+  // PERF-005: 모든 청크 해싱을 병렬로 수행
+  const hashPromises = pendingHashes.map(async ({ index, text }) => {
+    chunks[index].hash = await hashText(text);
+  });
+  await Promise.all(hashPromises);
+
   return chunks;
 }
 
