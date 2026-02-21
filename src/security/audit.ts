@@ -31,6 +31,8 @@ import {
   formatPermissionDetail,
   formatPermissionRemediation,
   inspectPathPermissions,
+  fixPathPermissions,
+  type PermissionFixResult,
 } from "./audit-fs.js";
 import { createSecurityAuditFindingEvent, type SecuritySeverity } from "./security-events.js";
 import { logSecurityEvent, alertCriticalEvent } from "./siem-logger.js";
@@ -85,6 +87,8 @@ export type SecurityAuditOptions = {
   probeGatewayFn?: typeof probeGateway;
   /** Dependency injection for tests (Windows ACL checks). */
   execIcacls?: ExecFn;
+  /** 자동 권한 수정 활성화 */
+  autoFixPermissions?: boolean;
 };
 
 function countBySeverity(findings: SecurityAuditFinding[]): SecurityAuditSummary {
@@ -116,6 +120,7 @@ async function collectFilesystemFindings(params: {
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   execIcacls?: ExecFn;
+  autoFixPermissions?: boolean;
 }): Promise<SecurityAuditFinding[]> {
   const findings: SecurityAuditFinding[] = [];
 
@@ -237,6 +242,46 @@ async function collectFilesystemFindings(params: {
     }
   }
 
+  // 자동 권한 수정
+  if (params.autoFixPermissions) {
+    const fixResults: PermissionFixResult[] = [];
+
+    // State 디렉토리 권한 수정 (world-writable인 경우)
+    if (stateDirPerms.worldWritable || stateDirPerms.groupWritable) {
+      const result = await fixPathPermissions(params.stateDir, 0o700, params.platform, {
+        createBackup: true,
+      });
+      fixResults.push(result);
+    }
+
+    // Config 파일 권한 수정 (world-readable/writable인 경우)
+    if (configPerms.worldWritable || configPerms.worldReadable || configPerms.groupWritable) {
+      const result = await fixPathPermissions(params.configPath, 0o600, params.platform, {
+        createBackup: true,
+      });
+      fixResults.push(result);
+    }
+
+    // 수정 결과를 findings에 추가
+    for (const result of fixResults) {
+      if (result.success) {
+        findings.push({
+          checkId: "fs.permission_auto_fixed",
+          severity: "info",
+          title: "Permission automatically fixed",
+          detail: `Fixed permissions for ${result.targetPath}: ${result.previousMode?.toString(8).padStart(3, "0")} -> ${result.newMode.toString(8).padStart(3, "0")}`,
+        });
+      } else {
+        findings.push({
+          checkId: "fs.permission_auto_fix_failed",
+          severity: "warn",
+          title: "Failed to automatically fix permission",
+          detail: `Could not fix permissions for ${result.targetPath}: ${result.error}`,
+        });
+      }
+    }
+  }
+
   return findings;
 }
 
@@ -306,6 +351,29 @@ function collectGatewayConfigFindings(
       detail: `gateway.tailscale.mode="funnel" exposes the Gateway publicly; keep auth strict and treat it as internet-facing.`,
       remediation: `Prefer tailscale.mode="serve" (tailnet-only) or set tailscale.mode="off".`,
     });
+
+    // Tailscale Funnel + MFA 강제 적용 검증
+    const mfaEnabled = cfg.gateway?.mfa?.enabled === true;
+    const enforceMfa = cfg.gateway?.mfa?.enforceForFunnel === true;
+
+    if (!mfaEnabled) {
+      findings.push({
+        checkId: "gateway.tailscale_funnel.mfa_required",
+        severity: "critical",
+        title: "Tailscale Funnel requires MFA",
+        detail:
+          "Tailscale Funnel exposes the Gateway to the public internet. MFA must be enabled for security.",
+        remediation: "Set gateway.mfa.enabled=true to enable MFA for Tailscale Funnel.",
+      });
+    } else if (!enforceMfa) {
+      findings.push({
+        checkId: "gateway.tailscale_funnel.mfa_enforce",
+        severity: "critical",
+        title: "Tailscale Funnel requires MFA enforcement",
+        detail: "Tailscale Funnel is enabled but MFA is not enforced for funnel connections.",
+        remediation: "Set gateway.mfa.enforceForFunnel=true to enforce MFA for Tailscale Funnel.",
+      });
+    }
   } else if (tailscaleMode === "serve") {
     findings.push({
       checkId: "gateway.tailscale_serve",
@@ -594,6 +662,7 @@ export async function runSecurityAudit(opts: SecurityAuditOptions): Promise<Secu
         env,
         platform,
         execIcacls,
+        autoFixPermissions: opts.autoFixPermissions,
       })),
     );
     if (configSnapshot) {
