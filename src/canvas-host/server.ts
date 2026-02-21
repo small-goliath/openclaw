@@ -114,7 +114,7 @@ function defaultIndexHTML() {
   const bridgeStatus = hasHelper() ? "ready" : "missing";
   const iosStatus = hasIOS() ? "yes" : "no";
   const androidStatus = hasAndroid() ? "yes" : "no";
-  statusEl.textContent = `Bridge: ${bridgeStatus} · iOS=${iosStatus} · Android=${androidStatus}`;
+  statusEl.textContent = "Bridge: " + bridgeStatus + " · iOS=" + iosStatus + " · Android=" + androidStatus;
   // 상태에 따른 스타일 클래스 적용
   statusEl.className = hasHelper() ? "ok" : "bad";
 
