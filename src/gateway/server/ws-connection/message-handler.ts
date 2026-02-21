@@ -24,6 +24,7 @@ import { recordRemoteNodeInfo, refreshRemoteNodeBins } from "../../../infra/skil
 import { upsertPresence } from "../../../infra/system-presence.js";
 import { loadVoiceWakeConfig } from "../../../infra/voicewake.js";
 import { rawDataToString } from "../../../infra/ws.js";
+import { safeJsonParse, JsonParseError } from "../../../utils/json-safe.js";
 import { isGatewayCliClient, isWebchatClient } from "../../../utils/message-channel.js";
 import {
   AUTH_RATE_LIMIT_SCOPE_DEVICE_TOKEN,
@@ -178,7 +179,7 @@ export function attachGatewayWsMessageHandler(params: {
     }
     const text = rawDataToString(data);
     try {
-      const parsed = JSON.parse(text);
+      const parsed = safeJsonParse(text, 100);
       const frameType =
         parsed && typeof parsed === "object" && "type" in parsed
           ? typeof (parsed as { type?: unknown }).type === "string"
@@ -978,10 +979,21 @@ export function attachGatewayWsMessageHandler(params: {
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
       });
     } catch (err) {
-      logGateway.error(`parse/handle error: ${String(err)}`);
-      logWs("out", "parse-error", { connId, error: formatForLog(err) });
+      if (err instanceof JsonParseError) {
+        logGateway.warn(`JSON parse error: ${err.message}`, {
+          cause: err.cause,
+          depth: err.depth,
+        });
+        logWs("out", "parse-error", {
+          connId,
+          error: `JSON parse error: ${err.message}`,
+        });
+      } else {
+        logGateway.error(`parse/handle error: ${String(err)}`);
+        logWs("out", "parse-error", { connId, error: formatForLog(err) });
+      }
       if (!getClient()) {
-        close();
+        close(1007, "invalid payload");
       }
     }
   });

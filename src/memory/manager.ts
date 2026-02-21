@@ -40,6 +40,10 @@ const FTS_TABLE = "chunks_fts";
 const EMBEDDING_CACHE_TABLE = "embedding_cache";
 const BATCH_FAILURE_LIMIT = 2;
 
+// 쿼리 제한 상수
+const QUERY_TIMEOUT_MS = 5000; // 5초 타임아웃
+const MAX_QUERY_LENGTH = 1000; // 최대 1000자
+
 const log = createSubsystemLogger("memory");
 
 // LRU Cache 설정 환경 변수
@@ -288,6 +292,13 @@ export class MemoryIndexManager implements MemorySearchManager {
       sessionKey?: string;
     },
   ): Promise<MemorySearchResult[]> {
+    // 쿼리 길이 검증
+    if (query.length > MAX_QUERY_LENGTH) {
+      throw new Error(
+        `Query exceeds maximum length of ${MAX_QUERY_LENGTH} characters (got ${query.length})`,
+      );
+    }
+
     void this.warmSession(opts?.sessionKey);
     if (this.settings.sync.onSearch && (this.dirty || this.sessionsDirty)) {
       void this.sync({ reason: "search" }).catch((err) => {
@@ -298,6 +309,26 @@ export class MemoryIndexManager implements MemorySearchManager {
     if (!cleaned) {
       return [];
     }
+
+    // 타임아웃 적용된 검색 실행
+    return Promise.race([
+      this.executeSearch(cleaned, opts),
+      new Promise<MemorySearchResult[]>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`Query timeout after ${QUERY_TIMEOUT_MS}ms`)),
+          QUERY_TIMEOUT_MS,
+        ),
+      ),
+    ]);
+  }
+
+  private async executeSearch(
+    cleaned: string,
+    opts?: {
+      maxResults?: number;
+      minScore?: number;
+    },
+  ): Promise<MemorySearchResult[]> {
     const minScore = opts?.minScore ?? this.settings.query.minScore;
     const maxResults = opts?.maxResults ?? this.settings.query.maxResults;
     const hybrid = this.settings.query.hybrid;
