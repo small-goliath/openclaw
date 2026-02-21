@@ -64,6 +64,25 @@ export type MemoryProviderStatus = {
     maxSize?: number;
     evictions?: number;
   };
+  indexCache?: {
+    hits: number;
+    misses: number;
+    hitRate: number;
+    size: number;
+    maxSize: number;
+    evictions: number;
+    expired: number;
+    config: {
+      maxSize: number;
+      defaultTTL: number;
+      sessionTTL: number;
+      cleanupInterval: number;
+    };
+  };
+  sessionDeltas?: {
+    count: number;
+    ttl: number;
+  };
   custom?: Record<string, unknown>;
 };
 

@@ -14,6 +14,7 @@ import type {
 } from "./types.js";
 import { resolveAgentDir, resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
 import { resolveMemorySearchConfig } from "../agents/memory-search.js";
+import { LRUCache } from "../infra/cache/lru-cache.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import {
   createEmbeddingProvider,
@@ -41,7 +42,30 @@ const BATCH_FAILURE_LIMIT = 2;
 
 const log = createSubsystemLogger("memory");
 
-const INDEX_CACHE = new Map<string, MemoryIndexManager>();
+// LRU Cache 설정 환경 변수
+function resolveMemoryCacheConfig() {
+  const maxSize = parseInt(process.env.OPENCLAW_MEMORY_CACHE_MAX_SIZE?.trim() ?? "100", 10);
+  const defaultTTL = parseInt(process.env.OPENCLAW_MEMORY_CACHE_TTL_MS?.trim() ?? "3600000", 10); // 1시간
+  const sessionTTL = parseInt(process.env.OPENCLAW_MEMORY_SESSION_TTL_MS?.trim() ?? "1800000", 10); // 30분
+  const cleanupInterval = parseInt(
+    process.env.OPENCLAW_MEMORY_CLEANUP_INTERVAL_MS?.trim() ?? "300000",
+    10,
+  ); // 5분
+
+  return {
+    maxSize: Number.isFinite(maxSize) && maxSize > 0 ? maxSize : 100,
+    defaultTTL: Number.isFinite(defaultTTL) && defaultTTL > 0 ? defaultTTL : 3600000,
+    sessionTTL: Number.isFinite(sessionTTL) && sessionTTL > 0 ? sessionTTL : 1800000,
+    cleanupInterval:
+      Number.isFinite(cleanupInterval) && cleanupInterval > 0 ? cleanupInterval : 300000,
+  };
+}
+
+const CACHE_CONFIG = resolveMemoryCacheConfig();
+const INDEX_CACHE = new LRUCache<MemoryIndexManager>({
+  maxSize: CACHE_CONFIG.maxSize,
+  defaultTTL: CACHE_CONFIG.defaultTTL,
+});
 
 export class MemoryIndexManager implements MemorySearchManager {
   // oxlint-disable-next-line typescript/no-explicit-any
@@ -99,8 +123,9 @@ export class MemoryIndexManager implements MemorySearchManager {
   private sessionPendingFiles = new Set<string>();
   private sessionDeltas = new Map<
     string,
-    { lastSize: number; pendingBytes: number; pendingMessages: number }
+    { lastSize: number; pendingBytes: number; pendingMessages: number; lastAccessed: number }
   >();
+  private cleanupTimer: NodeJS.Timeout | null = null;
   private sessionWarm = new Set<string>();
   private syncing: Promise<void> | null = null;
 
@@ -182,8 +207,61 @@ export class MemoryIndexManager implements MemorySearchManager {
     this.ensureWatcher();
     this.ensureSessionListener();
     this.ensureIntervalSync();
+    this.ensureBackgroundCleanup();
     this.dirty = this.sources.has("memory");
     this.batch = this.resolveBatchConfig();
+  }
+
+  /**
+   * 백그라운드 cleanup 타이머 시작
+   * 만료된 캐시 항목과 세션 델타를 주기적으로 정리
+   */
+  private ensureBackgroundCleanup(): void {
+    if (this.cleanupTimer) {
+      return;
+    }
+    this.cleanupTimer = setInterval(() => {
+      this.runBackgroundCleanup();
+    }, CACHE_CONFIG.cleanupInterval);
+    // 타이머가 프로세스 종료를 막지 않도록 unref 설정
+    this.cleanupTimer.unref?.();
+  }
+
+  /**
+   * 백그라운드 cleanup 실행
+   */
+  private runBackgroundCleanup(): void {
+    try {
+      // LRU Cache cleanup
+      const expiredCount = INDEX_CACHE.cleanup();
+      if (expiredCount > 0) {
+        log.debug(`memory cache cleanup: removed ${expiredCount} expired entries`);
+      }
+
+      // Session Delta cleanup
+      const removedSessions = this.cleanupExpiredSessionDeltas();
+      if (removedSessions > 0) {
+        log.debug(`session delta cleanup: removed ${removedSessions} expired sessions`);
+      }
+    } catch (err) {
+      log.warn(`background cleanup failed: ${String(err)}`);
+    }
+  }
+
+  /**
+   * 만료된 세션 델타 정리
+   * @returns 제거된 세션 수
+   */
+  private cleanupExpiredSessionDeltas(): number {
+    const now = Date.now();
+    let removed = 0;
+    for (const [key, state] of this.sessionDeltas.entries()) {
+      if (now - state.lastAccessed > CACHE_CONFIG.sessionTTL) {
+        this.sessionDeltas.delete(key);
+        removed++;
+      }
+    }
+    return removed;
   }
 
   async warmSession(sessionKey?: string): Promise<void> {
@@ -506,6 +584,19 @@ export class MemoryIndexManager implements MemorySearchManager {
             ...this.stmtCache.getStats(),
           }
         : { enabled: false },
+      indexCache: {
+        ...INDEX_CACHE.getStats(),
+        config: {
+          maxSize: CACHE_CONFIG.maxSize,
+          defaultTTL: CACHE_CONFIG.defaultTTL,
+          sessionTTL: CACHE_CONFIG.sessionTTL,
+          cleanupInterval: CACHE_CONFIG.cleanupInterval,
+        },
+      },
+      sessionDeltas: {
+        count: this.sessionDeltas.size,
+        ttl: CACHE_CONFIG.sessionTTL,
+      },
     };
   }
 
@@ -542,6 +633,10 @@ export class MemoryIndexManager implements MemorySearchManager {
     if (this.intervalTimer) {
       clearInterval(this.intervalTimer);
       this.intervalTimer = null;
+    }
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
     }
     if (this.watcher) {
       await this.watcher.close();

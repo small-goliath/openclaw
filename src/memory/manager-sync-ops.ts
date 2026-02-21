@@ -379,11 +379,14 @@ class MemoryManagerSyncOps {
       return null;
     }
     const size = stat.size;
+    const now = Date.now();
     let state = this.sessionDeltas.get(sessionFile);
     if (!state) {
-      state = { lastSize: 0, pendingBytes: 0, pendingMessages: 0 };
+      state = { lastSize: 0, pendingBytes: 0, pendingMessages: 0, lastAccessed: now };
       this.sessionDeltas.set(sessionFile, state);
     }
+    // 마지막 접근 시간 업데이트
+    state.lastAccessed = now;
     const deltaBytes = Math.max(0, size - state.lastSize);
     if (deltaBytes === 0 && size === state.lastSize) {
       return {
@@ -457,6 +460,7 @@ class MemoryManagerSyncOps {
     state.lastSize = size;
     state.pendingBytes = 0;
     state.pendingMessages = 0;
+    state.lastAccessed = Date.now();
   }
 
   private isSessionFileForAgent(sessionFile: string): boolean {
