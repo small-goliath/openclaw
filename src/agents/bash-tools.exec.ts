@@ -59,6 +59,87 @@ import {
 import { callGatewayTool } from "./tools/gateway.js";
 import { listNodes, resolveNodeIdFromList } from "./tools/nodes-utils.js";
 
+/**
+ * Command Injection 방지를 위한 명령어 검증 함수
+ * OWASP A03:2021 - Injection 취약점 방어
+ *
+ * @param command 검증할 명령어
+ * @returns 검증 결과와 실패 시 이유
+ */
+export function validateCommand(command: string): { valid: boolean; reason?: string } {
+  // 기본 검사: null, undefined, 비문자열
+  if (!command || typeof command !== "string") {
+    return { valid: false, reason: "Command is empty or invalid" };
+  }
+
+  const trimmed = command.trim();
+
+  // 빈 문자열 검사
+  if (!trimmed) {
+    return { valid: false, reason: "Command is empty" };
+  }
+
+  // 길이 제한 (너무 긴 명령어는 잠재적 공격 가능성)
+  const MAX_COMMAND_LENGTH = 10000;
+  if (trimmed.length > MAX_COMMAND_LENGTH) {
+    return { valid: false, reason: "Command exceeds maximum length" };
+  }
+
+  // 다중 명령어 차단 (줄바꿈 문자) - 먼저 체크
+  if (/[\n\r]/.test(trimmed)) {
+    return { valid: false, reason: "Multiple commands are not allowed" };
+  }
+
+  // Command substitution 차단: $(...) - $ 문자가 dangerousChars보다 먼저 체크
+  if (/\$\s*\(/.test(trimmed)) {
+    return { valid: false, reason: "Command substitution is not allowed" };
+  }
+
+  // Variable expansion 차단: $VAR 또는 ${VAR}
+  if (/\$[a-zA-Z_]/.test(trimmed) || /\$\{[^}]*\}/.test(trimmed)) {
+    return { valid: false, reason: "Variable expansion is not allowed" };
+  }
+
+  // Process substitution 차단: <(...) 또는 >(...)
+  if (/[<>]\s*\(/.test(trimmed)) {
+    return { valid: false, reason: "Process substitution is not allowed" };
+  }
+
+  // 논리 연산자 차단 - &&, || (메타문자 체크 전에)
+  if (/&&/.test(trimmed) || /\|\|/.test(trimmed)) {
+    return { valid: false, reason: "Logical operators are not allowed" };
+  }
+
+  // Shell 메타문자 차단 (단, 이미 체크한 패턴 제외)
+  // ; | & ` ( ) { } [ ] < > * ? #
+  const dangerousChars = /[;|&`(){}[\]<>*?#]/;
+  if (dangerousChars.test(trimmed)) {
+    return { valid: false, reason: "Command contains dangerous shell characters" };
+  }
+
+  // 위험한 명령어 차단 (단어 경계 기준)
+  const dangerousCommands =
+    /\b(rm|mkfs|dd|fdisk|format|del|erase|chmod|chown|mount|umount|reboot|shutdown|poweroff|halt|init|kill|killall|pkill)\b/i;
+  if (dangerousCommands.test(trimmed)) {
+    return { valid: false, reason: "Dangerous system command detected" };
+  }
+
+  // 민감한 시스템 경로 접근 차단
+  const sensitivePaths =
+    /(\/etc\/|\/root\/|\/sys\/|\/proc\/|\/boot\/|\/dev\/|\/bin\/|\/sbin\/|\/usr\/sbin\/)/i;
+  if (sensitivePaths.test(trimmed)) {
+    return { valid: false, reason: "Access to sensitive system paths is not allowed" };
+  }
+
+  // 파일 시스템 redirect 차단 (> /etc/... 또는 >> /etc/...)
+  // 파일 디스크립터 숫자도 체크 (2>, 1> 등)
+  if (/\d*\s*>>?\s*\/etc\//i.test(trimmed)) {
+    return { valid: false, reason: "Redirect to sensitive paths is not allowed" };
+  }
+
+  return { valid: true };
+}
+
 export type ExecToolDefaults = {
   host?: ExecHost;
   security?: ExecSecurity;
@@ -165,6 +246,15 @@ export function createExecTool(
 
       if (!params.command) {
         throw new Error("Provide a command to start.");
+      }
+
+      // Command Injection 방지 검증 (OWASP A03:2021)
+      const validation = validateCommand(params.command);
+      if (!validation.valid) {
+        logInfo(
+          `Command validation failed: ${validation.reason} - command: ${truncateMiddle(params.command, 80)}`,
+        );
+        throw new Error(`Command validation failed: ${validation.reason}`);
       }
 
       const maxOutput = DEFAULT_MAX_OUTPUT;
