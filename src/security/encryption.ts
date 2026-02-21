@@ -21,6 +21,7 @@ import path from "node:path";
 import { resolveStateDir } from "../config/paths.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getOrInitWorkerPool, type CryptoWorkerPool } from "../workers/worker-pool.js";
+import { logSecurityEvent, alertCriticalEvent } from "./siem-logger.js";
 
 const log = createSubsystemLogger("security/encryption");
 
@@ -449,6 +450,7 @@ export class KeyManager {
           "SECURITY: OS keychain storage failed and fail-secure mode is enabled. " +
             "Encryption will be disabled. Please configure OS keychain or disable fail-secure mode.",
         );
+        await this.notifyKeychainFailure("fail_secure_mode");
         return null;
       }
 
@@ -468,47 +470,12 @@ export class KeyManager {
             "- Linux: secret-tool (libsecret) should be installed\n" +
             "- Windows: Credential Manager should be accessible",
         );
+        await this.notifyKeychainFailure("fallback_disabled");
         return null;
       }
 
-      // File fallback with security warnings
-      log.warn(
-        "SECURITY WARNING: OS keychain storage failed. Falling back to file-based storage. " +
-          "This is LESS SECURE than OS keychain as the key may be accessible to other processes.",
-      );
-      log.warn(
-        "To improve security, please:\n" +
-          "1. Ensure OS keychain service is running\n" +
-          "2. Check application permissions for keychain access\n" +
-          "3. Consider using AWS KMS or Azure Key Vault for production",
-      );
-
-      const keyPath = this.config.localKeyPath || this.getDefaultKeyPath();
-      try {
-        await fs.promises.mkdir(path.dirname(keyPath), { recursive: true, mode: 0o700 });
-        await fs.promises.writeFile(keyPath, keyBase64, { mode: 0o600 });
-
-        // Verify file permissions were set correctly (security check)
-        const stats = await fs.promises.stat(keyPath);
-        const mode = stats.mode & 0o777;
-        if (mode !== 0o600) {
-          log.error(
-            `SECURITY: Key file permissions are ${mode.toString(8)}, expected 600. Attempting to fix...`,
-          );
-          await fs.promises.chmod(keyPath, 0o600);
-        }
-
-        // Log file storage details for audit
-        log.info("SECURITY: Encryption key stored to FILE (fallback mode)", {
-          keyPath,
-          permissions: "600",
-          owner: stats.uid,
-          warning: "File storage is less secure than OS keychain",
-        });
-      } catch (err) {
-        log.error("failed to store encryption key to file", { err, keyPath });
-        return null;
-      }
+      // File fallback with enhanced security
+      return await this.handleKeychainFailure(keyBase64, newKey);
     }
 
     // Store metadata
@@ -524,16 +491,308 @@ export class KeyManager {
     return newKey;
   }
 
+  /**
+   * 키체인 실패 처리 - 파일 폴팩 (강화된 보안)
+   */
+  private async handleKeychainFailure(keyBase64: string, newKey: Buffer): Promise<Buffer | null> {
+    // Critical 보안 알림
+    await alertCriticalEvent({
+      type: "encryption_key_file_fallback",
+      severity: "high",
+      message: "OS keychain storage failed, falling back to file-based storage",
+      timestamp: Date.now(),
+    });
+
+    log.warn(
+      "SECURITY WARNING: OS keychain storage failed. Falling back to file-based storage. " +
+        "This is LESS SECURE than OS keychain as the key may be accessible to other processes.",
+    );
+    log.warn(
+      "To improve security, please:\n" +
+        "1. Ensure OS keychain service is running\n" +
+        "2. Check application permissions for keychain access\n" +
+        "3. Consider using AWS KMS or Azure Key Vault for production",
+    );
+
+    const keyPath = this.config.localKeyPath || this.getDefaultKeyPath();
+    try {
+      // 디렉토리 생성 (안전한 권한)
+      await fs.promises.mkdir(path.dirname(keyPath), { recursive: true, mode: 0o700 });
+
+      // 키 파일 저장 (600 권한)
+      await fs.promises.writeFile(keyPath, keyBase64, { mode: 0o600 });
+
+      // 권한 검증
+      const stats = await fs.promises.stat(keyPath);
+      const mode = stats.mode & 0o777;
+
+      if (mode !== 0o600) {
+        log.error(
+          `SECURITY: Key file permissions ${mode.toString(8)} != 600. Attempting to fix...`,
+        );
+        await fs.promises.chmod(keyPath, 0o600);
+      }
+
+      // 체크섬 생성 (무결성 검증)
+      const checksum = crypto.createHash("sha256").update(keyBase64).digest("hex");
+      const checksumPath = `${keyPath}.checksum`;
+      await fs.promises.writeFile(checksumPath, checksum, { mode: 0o600 });
+
+      // SIEM 로깅
+      await logSecurityEvent({
+        type: "key_file_fallback_used",
+        keyPath,
+        permissions: mode,
+        checksum,
+        timestamp: Date.now(),
+      });
+
+      // Log file storage details for audit
+      log.info("SECURITY: Encryption key stored to FILE (fallback mode)", {
+        keyPath,
+        permissions: "600",
+        owner: stats.uid,
+        warning: "File storage is less secure than OS keychain",
+      });
+
+      return newKey;
+    } catch (err) {
+      log.error("failed to store encryption key to file", { err, keyPath });
+      await this.notifyKeychainFailure("file_storage_failed");
+      return null;
+    }
+  }
+
+  /**
+   * 키체인 실패 알림
+   */
+  private async notifyKeychainFailure(reason: string): Promise<void> {
+    await alertCriticalEvent({
+      type: "keychain_failure",
+      reason,
+      timestamp: Date.now(),
+      severity: "critical",
+    });
+  }
+
+  /**
+   * 키 파일 무결성 검증
+   */
+  async verifyKeyFileIntegrity(): Promise<boolean> {
+    const keyPath = this.config.localKeyPath || this.getDefaultKeyPath();
+    const checksumPath = `${keyPath}.checksum`;
+
+    try {
+      if (!fs.existsSync(keyPath) || !fs.existsSync(checksumPath)) {
+        return false;
+      }
+
+      const keyContent = fs.readFileSync(keyPath, "utf-8");
+      const storedChecksum = fs.readFileSync(checksumPath, "utf-8").trim();
+      const computedChecksum = crypto.createHash("sha256").update(keyContent).digest("hex");
+
+      if (storedChecksum !== computedChecksum) {
+        log.error("SECURITY: Key file integrity check failed!");
+        await alertCriticalEvent({
+          type: "encryption_key_integrity_failure",
+          keyPath,
+          timestamp: Date.now(),
+        });
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      log.warn("Key file integrity verification failed", { err });
+      return false;
+    }
+  }
+
   private async getAwsKmsKey(): Promise<Buffer | null> {
-    // TODO: Implement AWS KMS integration
-    log.error("AWS KMS provider not yet implemented");
-    return null;
+    try {
+      // 동적 import로 AWS SDK 로드
+      const { KMSClient, GenerateDataKeyCommand, DecryptCommand } =
+        await import("@aws-sdk/client-kms");
+
+      const keyId = this.config.keyId || process.env.AWS_KMS_KEY_ID;
+      if (!keyId) {
+        log.error("AWS KMS Key ID not configured");
+        await alertCriticalEvent({
+          type: "encryption_key_failure",
+          provider: "aws-kms",
+          reason: "key_id_missing",
+          timestamp: Date.now(),
+        });
+        return null;
+      }
+
+      const region = process.env.AWS_REGION || "us-east-1";
+      const client = new KMSClient({ region });
+
+      // 먼저 저장된 암호화된 데이터 키가 있는지 확인
+      const encryptedKeyPath = this.getAwsEncryptedKeyPath();
+      if (fs.existsSync(encryptedKeyPath)) {
+        try {
+          const encryptedKey = fs.readFileSync(encryptedKeyPath, "base64");
+          const decryptCommand = new DecryptCommand({
+            CiphertextBlob: Buffer.from(encryptedKey, "base64"),
+          });
+          const decryptResponse = await client.send(decryptCommand);
+
+          if (decryptResponse.Plaintext) {
+            log.info("AWS KMS: decrypted existing data key");
+            return Buffer.from(decryptResponse.Plaintext);
+          }
+        } catch (err) {
+          log.warn("AWS KMS: failed to decrypt existing key, generating new one", { err });
+        }
+      }
+
+      // 새 데이터 키 생성 (Envelope Encryption)
+      const command = new GenerateDataKeyCommand({
+        KeyId: keyId,
+        KeySpec: "AES_256",
+      });
+
+      const response = await client.send(command);
+
+      if (!response.Plaintext || !response.CiphertextBlob) {
+        throw new Error("KMS GenerateDataKey returned empty response");
+      }
+
+      // 암호화된 데이터 키 저장 (나중에 복호화용)
+      const encryptedKey = Buffer.from(response.CiphertextBlob).toString("base64");
+      fs.mkdirSync(path.dirname(encryptedKeyPath), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(encryptedKeyPath, encryptedKey, { mode: 0o600 });
+
+      // 평문 데이터 키 반환 (메모리에만 유지)
+      const plaintextKey = Buffer.from(response.Plaintext);
+
+      log.info("AWS KMS: generated new data key", { keyId });
+
+      // SIEM 로깅
+      await logSecurityEvent({
+        type: "encryption_key_generated",
+        provider: "aws-kms",
+        keyId,
+        timestamp: Date.now(),
+      });
+
+      return plaintextKey;
+    } catch (err) {
+      log.error("AWS KMS operation failed", { err });
+      await alertCriticalEvent({
+        type: "encryption_key_failure",
+        provider: "aws-kms",
+        reason: "operation_failed",
+        error: String(err),
+        timestamp: Date.now(),
+      });
+      return null;
+    }
+  }
+
+  private getAwsEncryptedKeyPath(): string {
+    return path.join(resolveStateDir(), ".aws-kms-encrypted-key");
   }
 
   private async getAzureKeyVaultKey(): Promise<Buffer | null> {
-    // TODO: Implement Azure Key Vault integration
-    log.error("Azure Key Vault provider not yet implemented");
-    return null;
+    try {
+      // 동적 import로 Azure SDK 로드
+      const { KeyClient, CryptographyClient } = await import("@azure/keyvault-keys");
+      const { DefaultAzureCredential } = await import("@azure/identity");
+
+      const vaultUrl = process.env.AZURE_KEY_VAULT_URL;
+      const keyName = this.config.keyId || process.env.AZURE_KEY_NAME;
+
+      if (!vaultUrl || !keyName) {
+        log.error("Azure Key Vault configuration missing");
+        await alertCriticalEvent({
+          type: "encryption_key_failure",
+          provider: "azure-keyvault",
+          reason: "configuration_missing",
+          timestamp: Date.now(),
+        });
+        return null;
+      }
+
+      // Azure AD 인증 (DefaultAzureCredential 사용)
+      const credential = new DefaultAzureCredential();
+      const keyClient = new KeyClient(vaultUrl, credential);
+
+      // 먼저 저장된 래핑된 키가 있는지 확인
+      const wrappedKeyPath = this.getAzureWrappedKeyPath();
+      if (fs.existsSync(wrappedKeyPath)) {
+        try {
+          const wrappedKey = fs.readFileSync(wrappedKeyPath, "base64");
+
+          // 키 가져오기
+          const key = await keyClient.getKey(keyName);
+          const cryptoClient = new CryptographyClient(key, credential);
+
+          // 키 언래핑
+          const unwrapResult = await cryptoClient.unwrapKey(
+            "RSA-OAEP",
+            Buffer.from(wrappedKey, "base64"),
+          );
+
+          if (unwrapResult.result) {
+            log.info("Azure Key Vault: unwrapped existing data key");
+            return Buffer.from(unwrapResult.result);
+          }
+        } catch (err) {
+          log.warn("Azure Key Vault: failed to unwrap existing key, generating new one", { err });
+        }
+      }
+
+      // 새 데이터 키 생성 (로컬) 및 래핑
+      const dataKey = generateRandomBytes(KEY_LENGTH);
+
+      // 키 가져오기 또는 생성
+      let key;
+      try {
+        key = await keyClient.getKey(keyName);
+      } catch {
+        log.info("Azure Key Vault: creating new RSA key", { keyName });
+        key = await keyClient.createRsaKey(keyName, { keySize: 4096 });
+      }
+
+      const cryptoClient = new CryptographyClient(key, credential);
+
+      // 데이터 키 래핑
+      const wrapResult = await cryptoClient.wrapKey("RSA-OAEP", dataKey);
+
+      // 래핑된 키 저장
+      const wrappedKey = Buffer.from(wrapResult.result).toString("base64");
+      fs.mkdirSync(path.dirname(wrappedKeyPath), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(wrappedKeyPath, wrappedKey, { mode: 0o600 });
+
+      log.info("Azure Key Vault: generated and wrapped new data key", { keyName });
+
+      // SIEM 로깅
+      await logSecurityEvent({
+        type: "encryption_key_generated",
+        provider: "azure-keyvault",
+        keyName,
+        timestamp: Date.now(),
+      });
+
+      return dataKey;
+    } catch (err) {
+      log.error("Azure Key Vault operation failed", { err });
+      await alertCriticalEvent({
+        type: "encryption_key_failure",
+        provider: "azure-keyvault",
+        reason: "operation_failed",
+        error: String(err),
+        timestamp: Date.now(),
+      });
+      return null;
+    }
+  }
+
+  private getAzureWrappedKeyPath(): string {
+    return path.join(resolveStateDir(), ".azure-keyvault-wrapped-key");
   }
 
   private getDefaultKeyPath(): string {
