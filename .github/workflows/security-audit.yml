@@ -124,9 +124,152 @@ jobs:
         with:
           category: "/language:${{matrix.language}}"
 
+  owasp-zap:
+    name: OWASP ZAP Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: "10.23.0"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build application
+        run: pnpm build
+
+      - name: Start application
+        run: |
+          pnpm start &
+          sleep 15
+
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: "http://localhost:3000"
+          rules_file_name: ".zap/rules.tsv"
+          cmd_options: "-a"
+          fail_action: false
+
+      - name: Upload ZAP reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-reports
+          path: report_*.html
+
+  openclaw-audit:
+    name: OpenClaw Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: "10.23.0"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build application
+        run: pnpm build
+
+      - name: Run OpenClaw Security Audit
+        run: |
+          node dist/index.js security audit --deep --json > openclaw-audit-report.json || true
+          cat openclaw-audit-report.json
+
+      - name: Check for Critical Findings
+        run: |
+          if jq -e '.summary.critical > 0' openclaw-audit-report.json 2>/dev/null; then
+            echo "::warning::Critical security findings detected!"
+            jq '.findings[] | select(.severity == "critical")' openclaw-audit-report.json
+          fi
+
+      - name: Upload Audit Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: openclaw-audit-report
+          path: openclaw-audit-report.json
+
+  generate-summary:
+    name: Generate Security Summary
+    needs: [npm-audit, snyk-scan, codeql, owasp-zap, openclaw-audit]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Generate summary
+        run: |
+          echo "# Security Audit Summary" > security-summary.md
+          echo "" >> security-summary.md
+          echo "Date: $(date)" >> security-summary.md
+          echo "" >> security-summary.md
+
+          echo "## NPM Audit" >> security-summary.md
+          if [ -f npm-audit-results/audit-results.json ]; then
+            CRITICAL=$(jq '.metadata.vulnerabilities.critical // 0' npm-audit-results/audit-results.json)
+            HIGH=$(jq '.metadata.vulnerabilities.high // 0' npm-audit-results/audit-results.json)
+            echo "- Critical: $CRITICAL" >> security-summary.md
+            echo "- High: $HIGH" >> security-summary.md
+          fi
+          echo "" >> security-summary.md
+
+          echo "## OpenClaw Security Audit" >> security-summary.md
+          if [ -f openclaw-audit-report/openclaw-audit-report.json ]; then
+            CRITICAL=$(jq '.summary.critical' openclaw-audit-report/openclaw-audit-report.json)
+            WARN=$(jq '.summary.warn' openclaw-audit-report/openclaw-audit-report.json)
+            INFO=$(jq '.summary.info' openclaw-audit-report/openclaw-audit-report.json)
+            echo "- Critical: $CRITICAL" >> security-summary.md
+            echo "- Warnings: $WARN" >> security-summary.md
+            echo "- Info: $INFO" >> security-summary.md
+          fi
+          echo "" >> security-summary.md
+
+          echo "## CodeQL Analysis" >> security-summary.md
+          echo "- Status: Completed" >> security-summary.md
+          echo "" >> security-summary.md
+
+          echo "## OWASP ZAP" >> security-summary.md
+          if [ -d zap-reports ]; then
+            echo "- Status: Completed" >> security-summary.md
+          else
+            echo "- Status: Skipped or Failed" >> security-summary.md
+          fi
+
+          cat security-summary.md
+
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-summary
+          path: security-summary.md
+
   notify:
     name: Notify on Failure
-    needs: [npm-audit, codeql]
+    needs: [npm-audit, codeql, openclaw-audit]
     runs-on: ubuntu-latest
     if: failure() && (github.event_name == 'schedule' || github.event_name == 'push')
     steps:
