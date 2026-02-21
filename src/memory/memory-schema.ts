@@ -1,11 +1,120 @@
 import type { DatabaseSync } from "node:sqlite";
+import {
+  getEncryptionService,
+  getOrInitEncryption,
+  createEncryptionConfigFromEnv,
+  type EncryptedData,
+} from "../security/encryption.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
+
+const log = createSubsystemLogger("memory/schema");
+
+/**
+ * Initialize encryption service for memory operations
+ */
+function ensureEncryptionService() {
+  let service = getEncryptionService();
+  if (!service) {
+    const config = createEncryptionConfigFromEnv();
+    service = getOrInitEncryption(config);
+  }
+  return service;
+}
+
+/**
+ * Check if encryption is enabled for memory data
+ */
+export function isMemoryEncryptionEnabled(): boolean {
+  const service = ensureEncryptionService();
+  return service.isEnabled();
+}
+
+/**
+ * Encrypt text content for storage in SQLite.
+ * Returns encrypted wrapper if encryption is enabled, otherwise returns original text.
+ */
+export async function encryptMemoryText(text: string): Promise<string | { encrypted: true; data: EncryptedData }> {
+  const service = ensureEncryptionService();
+  if (!service.isEnabled()) {
+    return text;
+  }
+
+  try {
+    const result = await service.encryptObject(text);
+    // If encryption returned the same object (disabled), return as string
+    if (typeof result === "string" || !(result as { encrypted?: boolean }).encrypted) {
+      return text;
+    }
+    return result as { encrypted: true; data: EncryptedData };
+  } catch (err) {
+    log.warn("failed to encrypt memory text", { err });
+    return text;
+  }
+}
+
+/**
+ * Decrypt text content from SQLite storage.
+ * Handles both encrypted and plaintext data (backward compatible).
+ */
+export async function decryptMemoryText(
+  stored: string | { encrypted?: boolean; data?: EncryptedData }
+): Promise<string> {
+  // Fast path: if it's just a string, return it
+  if (typeof stored === "string") {
+    return stored;
+  }
+
+  const service = ensureEncryptionService();
+
+  try {
+    const decrypted = await service.decryptObject<string>(stored);
+    return decrypted;
+  } catch (err) {
+    log.warn("failed to decrypt memory text", { err });
+    // Return original if decryption fails
+    return typeof stored === "string" ? stored : JSON.stringify(stored);
+  }
+}
+
+/**
+ * Serialize encrypted data for SQLite storage.
+ * Encrypted data is stored as JSON string.
+ */
+export function serializeMemoryValue(value: string | { encrypted: true; data: EncryptedData }): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * Deserialize memory value from SQLite storage.
+ * Attempts to parse JSON for encrypted data.
+ */
+export function deserializeMemoryValue(stored: string): string | { encrypted: true; data: EncryptedData } {
+  // Fast path: try to detect if it's encrypted JSON
+  if (!stored.startsWith('{"encrypted":')) {
+    return stored;
+  }
+
+  try {
+    const parsed = JSON.parse(stored);
+    if (parsed.encrypted && parsed.data) {
+      return parsed as { encrypted: true; data: EncryptedData };
+    }
+    return stored;
+  } catch {
+    return stored;
+  }
+}
 
 export function ensureMemoryIndexSchema(params: {
   db: DatabaseSync;
   embeddingCacheTable: string;
   ftsTable: string;
   ftsEnabled: boolean;
-}): { ftsAvailable: boolean; ftsError?: string } {
+  enableEncryption?: boolean;
+}): { ftsAvailable: boolean; ftsError?: string; encryptionEnabled: boolean } {
   params.db.exec(`
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
@@ -79,7 +188,13 @@ export function ensureMemoryIndexSchema(params: {
   params.db.exec(`CREATE INDEX IF NOT EXISTS idx_chunks_path ON chunks(path);`);
   params.db.exec(`CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source);`);
 
-  return { ftsAvailable, ...(ftsError ? { ftsError } : {}) };
+  // Check if encryption is enabled
+  const encryptionEnabled = params.enableEncryption ?? isMemoryEncryptionEnabled();
+  if (encryptionEnabled) {
+    log.info("memory encryption is enabled");
+  }
+
+  return { ftsAvailable, ...(ftsError ? { ftsError } : {}), encryptionEnabled };
 }
 
 function ensureColumn(

@@ -7,6 +7,119 @@ import { loadJsonFile, saveJsonFile } from "../../infra/json-file.js";
 import { AUTH_STORE_LOCK_OPTIONS, AUTH_STORE_VERSION, log } from "./constants.js";
 import { syncExternalCliCredentials } from "./external-cli-sync.js";
 import { ensureAuthStoreFile, resolveAuthStorePath, resolveLegacyAuthStorePath } from "./paths.js";
+import {
+  getEncryptionService,
+  getOrInitEncryption,
+  createEncryptionConfigFromEnv,
+  type EncryptedData,
+} from "../../security/encryption.js";
+
+/**
+ * Fields in AuthProfileCredential that contain sensitive credential data
+ */
+const SENSITIVE_CREDENTIAL_FIELDS: Array<keyof AuthProfileCredential> = [
+  "key",
+  "token",
+  "access",
+  "refresh",
+];
+
+/**
+ * Initialize encryption service for auth profiles
+ */
+function ensureEncryptionService() {
+  let service = getEncryptionService();
+  if (!service) {
+    const config = createEncryptionConfigFromEnv();
+    service = getOrInitEncryption(config);
+    if (config.enabled) {
+      log.info("encryption initialized for auth profiles");
+    }
+  }
+  return service;
+}
+
+/**
+ * Encrypt sensitive fields in a credential
+ */
+async function encryptCredential(
+  cred: AuthProfileCredential
+): Promise<AuthProfileCredential> {
+  const service = ensureEncryptionService();
+  if (!service.isEnabled()) {
+    return cred;
+  }
+
+  try {
+    return await service.encryptFields(cred, SENSITIVE_CREDENTIAL_FIELDS);
+  } catch (err) {
+    log.warn("failed to encrypt credential fields", { provider: cred.provider, err });
+    return cred;
+  }
+}
+
+/**
+ * Decrypt sensitive fields in a credential
+ */
+async function decryptCredential(
+  cred: AuthProfileCredential
+): Promise<AuthProfileCredential> {
+  const service = ensureEncryptionService();
+
+  try {
+    return await service.decryptFields(cred, SENSITIVE_CREDENTIAL_FIELDS);
+  } catch (err) {
+    log.warn("failed to decrypt credential fields", { provider: cred.provider, err });
+    return cred;
+  }
+}
+
+/**
+ * Encrypt all credentials in a store
+ */
+async function encryptStoreCredentials(store: AuthProfileStore): Promise<AuthProfileStore> {
+  const service = ensureEncryptionService();
+  if (!service.isEnabled()) {
+    return store;
+  }
+
+  const encryptedProfiles: Record<string, AuthProfileCredential> = {};
+
+  for (const [profileId, cred] of Object.entries(store.profiles)) {
+    encryptedProfiles[profileId] = await encryptCredential(cred);
+  }
+
+  return {
+    ...store,
+    profiles: encryptedProfiles,
+  };
+}
+
+/**
+ * Decrypt all credentials in a store
+ */
+async function decryptStoreCredentials(store: AuthProfileStore): Promise<AuthProfileStore> {
+  const service = ensureEncryptionService();
+  if (!service.isEnabled()) {
+    // Even if disabled, try to decrypt in case it was enabled before
+    const decryptedProfiles: Record<string, AuthProfileCredential> = {};
+    for (const [profileId, cred] of Object.entries(store.profiles)) {
+      decryptedProfiles[profileId] = await decryptCredential(cred);
+    }
+    return { ...store, profiles: decryptedProfiles };
+  }
+
+  const decryptedProfiles: Record<string, AuthProfileCredential> = {};
+
+  for (const [profileId, cred] of Object.entries(store.profiles)) {
+    decryptedProfiles[profileId] = await decryptCredential(cred);
+  }
+
+  return {
+    ...store,
+    profiles: decryptedProfiles,
+  };
+}
 
 type LegacyAuthStore = Record<string, AuthProfileCredential>;
 
@@ -27,10 +140,10 @@ export async function updateAuthProfileStoreWithLock(params: {
 
   try {
     return await withFileLock(authPath, AUTH_STORE_LOCK_OPTIONS, async () => {
-      const store = ensureAuthProfileStore(params.agentDir);
+      const store = await ensureAuthProfileStore(params.agentDir);
       const shouldSave = params.updater(store);
       if (shouldSave) {
-        saveAuthProfileStore(store, params.agentDir);
+        await saveAuthProfileStore(store, params.agentDir);
       }
       return store;
     });
@@ -340,7 +453,33 @@ function loadAuthProfileStoreForAgent(
   return store;
 }
 
-export function ensureAuthProfileStore(
+export async function ensureAuthProfileStore(
+  agentDir?: string,
+  options?: { allowKeychainPrompt?: boolean },
+): Promise<AuthProfileStore> {
+  const store = loadAuthProfileStoreForAgent(agentDir, options);
+
+  // Decrypt credentials after loading
+  const decryptedStore = await decryptStoreCredentials(store);
+
+  const authPath = resolveAuthStorePath(agentDir);
+  const mainAuthPath = resolveAuthStorePath();
+  if (!agentDir || authPath === mainAuthPath) {
+    return decryptedStore;
+  }
+
+  const mainStore = loadAuthProfileStoreForAgent(undefined, options);
+  const decryptedMainStore = await decryptStoreCredentials(mainStore);
+  const merged = mergeAuthProfileStores(decryptedMainStore, decryptedStore);
+
+  return merged;
+}
+
+/**
+ * Synchronous version of ensureAuthProfileStore for backward compatibility.
+ * Note: This will not decrypt credentials. Use async version for full encryption support.
+ */
+export function ensureAuthProfileStoreSync(
   agentDir?: string,
   options?: { allowKeychainPrompt?: boolean },
 ): AuthProfileStore {
@@ -357,7 +496,30 @@ export function ensureAuthProfileStore(
   return merged;
 }
 
-export function saveAuthProfileStore(store: AuthProfileStore, agentDir?: string): void {
+export async function saveAuthProfileStore(
+  store: AuthProfileStore,
+  agentDir?: string
+): Promise<void> {
+  const authPath = resolveAuthStorePath(agentDir);
+
+  // Encrypt credentials before saving
+  const encryptedStore = await encryptStoreCredentials(store);
+
+  const payload = {
+    version: AUTH_STORE_VERSION,
+    profiles: encryptedStore.profiles,
+    order: encryptedStore.order ?? undefined,
+    lastGood: encryptedStore.lastGood ?? undefined,
+    usageStats: encryptedStore.usageStats ?? undefined,
+  } satisfies AuthProfileStore;
+  saveJsonFile(authPath, payload);
+}
+
+/**
+ * Synchronous version of saveAuthProfileStore for backward compatibility.
+ * Note: This will not encrypt credentials. Use async version for encryption.
+ */
+export function saveAuthProfileStoreSync(store: AuthProfileStore, agentDir?: string): void {
   const authPath = resolveAuthStorePath(agentDir);
   const payload = {
     version: AUTH_STORE_VERSION,

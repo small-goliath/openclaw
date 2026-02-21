@@ -6,6 +6,40 @@ import { getChannelDock } from "../../channels/dock.js";
 import { normalizeChannelId } from "../../channels/plugins/index.js";
 import { normalizeMessageChannel } from "../../utils/message-channel.js";
 import { buildGroupDisplayName, resolveGroupSessionKey } from "./group.js";
+import {
+  getEncryptionService,
+  getOrInitEncryption,
+  createEncryptionConfigFromEnv,
+} from "../../security/encryption.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
+
+const log = createSubsystemLogger("sessions/metadata");
+
+/**
+ * Fields in SessionEntry that contain sensitive data and should be encrypted
+ */
+const SENSITIVE_SESSION_FIELDS: Array<keyof SessionEntry> = [
+  "origin",
+  "deliveryContext",
+  "lastTo",
+  "lastAccountId",
+  "lastThreadId",
+];
+
+/**
+ * Initialize encryption service if not already initialized
+ */
+function ensureEncryptionService() {
+  let service = getEncryptionService();
+  if (!service) {
+    const config = createEncryptionConfigFromEnv();
+    service = getOrInitEncryption(config);
+    if (config.enabled) {
+      log.info("encryption initialized for session metadata");
+    }
+  }
+  return service;
+}
 
 const mergeOrigin = (
   existing: SessionOrigin | undefined,
@@ -169,4 +203,86 @@ export function deriveSessionMetaPatch(params: {
   }
 
   return Object.keys(patch).length > 0 ? patch : null;
+}
+
+/**
+ * Encrypt sensitive fields in a SessionEntry.
+ * This is a no-op if encryption is not enabled.
+ */
+export async function encryptSessionEntry(entry: SessionEntry): Promise<SessionEntry> {
+  const service = ensureEncryptionService();
+  if (!service.isEnabled()) {
+    return entry;
+  }
+
+  try {
+    return await service.encryptFields(entry, SENSITIVE_SESSION_FIELDS);
+  } catch (err) {
+    log.warn("failed to encrypt session entry fields", { err, sessionId: entry.sessionId });
+    // Return unencrypted entry on failure (fail open for compatibility)
+    return entry;
+  }
+}
+
+/**
+ * Decrypt sensitive fields in a SessionEntry.
+ * Handles both encrypted and plaintext entries (backward compatible).
+ */
+export async function decryptSessionEntry(entry: SessionEntry): Promise<SessionEntry> {
+  const service = ensureEncryptionService();
+  if (!service.isEnabled()) {
+    // Even if encryption is disabled, try to decrypt in case it was enabled before
+    try {
+      return await service.decryptFields(entry, SENSITIVE_SESSION_FIELDS);
+    } catch {
+      // Return as-is if decryption fails
+      return entry;
+    }
+  }
+
+  try {
+    return await service.decryptFields(entry, SENSITIVE_SESSION_FIELDS);
+  } catch (err) {
+    log.warn("failed to decrypt session entry fields", { err, sessionId: entry.sessionId });
+    // Return entry as-is on decryption failure (may be plaintext)
+    return entry;
+  }
+}
+
+/**
+ * Encrypt session origin data.
+ */
+export async function encryptSessionOrigin(origin: SessionOrigin): Promise<SessionOrigin | { encrypted: true; data: unknown }> {
+  const service = ensureEncryptionService();
+  if (!service.isEnabled()) {
+    return origin;
+  }
+
+  try {
+    return await service.encryptObject(origin) as SessionOrigin | { encrypted: true; data: unknown };
+  } catch (err) {
+    log.warn("failed to encrypt session origin", { err });
+    return origin;
+  }
+}
+
+/**
+ * Decrypt session origin data.
+ */
+export async function decryptSessionOrigin(
+  origin: SessionOrigin | { encrypted?: boolean; data?: unknown }
+): Promise<SessionOrigin | undefined> {
+  const service = ensureEncryptionService();
+
+  try {
+    const decrypted = await service.decryptObject<SessionOrigin>(origin);
+    return decrypted;
+  } catch (err) {
+    log.warn("failed to decrypt session origin", { err });
+    // Return as-is if it's a plain SessionOrigin
+    if (origin && typeof origin === "object" && !(origin as { encrypted?: boolean }).encrypted) {
+      return origin as SessionOrigin;
+    }
+    return undefined;
+  }
 }
