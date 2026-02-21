@@ -55,6 +55,15 @@ export type MemoryProviderStatus = {
     lastError?: string;
     lastProvider?: string;
   };
+  statementCache?: {
+    enabled: boolean;
+    hits?: number;
+    misses?: number;
+    hitRate?: number;
+    size?: number;
+    maxSize?: number;
+    evictions?: number;
+  };
   custom?: Record<string, unknown>;
 };
 

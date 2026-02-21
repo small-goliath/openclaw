@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { type FSWatcher } from "chokidar";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -28,6 +28,11 @@ import { isMemoryPath, normalizeExtraMemoryPaths } from "./internal.js";
 import { memoryManagerEmbeddingOps } from "./manager-embedding-ops.js";
 import { searchKeyword, searchVector } from "./manager-search.js";
 import { memoryManagerSyncOps } from "./manager-sync-ops.js";
+import {
+  PreparedStatementCache,
+  createStatementCache,
+  type PreparedStatementCacheStats,
+} from "./sqlite-cache.js";
 const SNIPPET_MAX_CHARS = 700;
 const VECTOR_TABLE = "chunks_vec";
 const FTS_TABLE = "chunks_fts";
@@ -65,6 +70,7 @@ export class MemoryIndexManager implements MemorySearchManager {
   private batchFailureLastProvider?: string;
   private batchFailureLock: Promise<void> = Promise.resolve();
   private db: DatabaseSync;
+  private stmtCache: PreparedStatementCache | null;
   private readonly sources: Set<MemorySource>;
   private providerKey: string;
   private readonly cache: { enabled: boolean; maxEntries?: number };
@@ -156,6 +162,7 @@ export class MemoryIndexManager implements MemorySearchManager {
     this.voyage = params.providerResult.voyage;
     this.sources = new Set(params.settings.sources);
     this.db = this.openDatabase();
+    this.stmtCache = createStatementCache(this.db, params.cfg.env);
     this.providerKey = this.computeProviderKey();
     this.cache = {
       enabled: params.settings.cache.enabled,
@@ -493,6 +500,12 @@ export class MemoryIndexManager implements MemorySearchManager {
         lastError: this.batchFailureLastError,
         lastProvider: this.batchFailureLastProvider,
       },
+      statementCache: this.stmtCache
+        ? {
+            enabled: true,
+            ...this.stmtCache.getStats(),
+          }
+        : { enabled: false },
     };
   }
 
@@ -537,6 +550,11 @@ export class MemoryIndexManager implements MemorySearchManager {
     if (this.sessionUnsubscribe) {
       this.sessionUnsubscribe();
       this.sessionUnsubscribe = null;
+    }
+    // Close statement cache before closing database
+    if (this.stmtCache) {
+      this.stmtCache.close();
+      this.stmtCache = null;
     }
     this.db.close();
     INDEX_CACHE.delete(this.cacheKey);

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { OpenClawConfig, ConfigFileSnapshot, LegacyConfigIssue } from "./types.js";
+import { LRUCache } from "../infra/cache/lru-cache.js";
 import { loadDotEnv } from "../infra/dotenv.js";
 import { resolveRequiredHomeDir } from "../infra/home-dir.js";
 import {
@@ -1079,11 +1080,26 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
 // module scope. `OPENCLAW_CONFIG_PATH` (and friends) are expected to work even
 // when set after the module has been imported (tests, one-off scripts, etc.).
 const DEFAULT_CONFIG_CACHE_MS = 200;
-let configCache: {
-  configPath: string;
-  expiresAt: number;
-  config: OpenClawConfig;
-} | null = null;
+const DEFAULT_CONFIG_CACHE_MAX_SIZE = 10;
+
+// LRU Cache for config files with TTL and mtime-based invalidation
+// Key: configPath, Value: { config, mtime }
+let configCache: LRUCache<{ config: OpenClawConfig; mtime: number }> | null = null;
+
+// Cache statistics for monitoring
+interface ConfigCacheStats {
+  hits: number;
+  misses: number;
+  hitRate: number;
+  size: number;
+}
+
+let configCacheStats: ConfigCacheStats = {
+  hits: 0,
+  misses: 0,
+  hitRate: 0,
+  size: 0,
+};
 
 function resolveConfigCacheMs(env: NodeJS.ProcessEnv): number {
   const raw = env.OPENCLAW_CONFIG_CACHE_MS?.trim();
@@ -1100,6 +1116,18 @@ function resolveConfigCacheMs(env: NodeJS.ProcessEnv): number {
   return Math.max(0, parsed);
 }
 
+function resolveConfigCacheMaxSize(env: NodeJS.ProcessEnv): number {
+  const raw = env.OPENCLAW_CONFIG_CACHE_MAX_SIZE?.trim();
+  if (!raw) {
+    return DEFAULT_CONFIG_CACHE_MAX_SIZE;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_CONFIG_CACHE_MAX_SIZE;
+  }
+  return parsed;
+}
+
 function shouldUseConfigCache(env: NodeJS.ProcessEnv): boolean {
   if (env.OPENCLAW_DISABLE_CONFIG_CACHE?.trim()) {
     return false;
@@ -1107,31 +1135,102 @@ function shouldUseConfigCache(env: NodeJS.ProcessEnv): boolean {
   return resolveConfigCacheMs(env) > 0;
 }
 
+/**
+ * Initialize the config cache with proper settings
+ */
+function initializeConfigCache(
+  env: NodeJS.ProcessEnv,
+): LRUCache<{ config: OpenClawConfig; mtime: number }> {
+  const cacheMs = resolveConfigCacheMs(env);
+  const maxSize = resolveConfigCacheMaxSize(env);
+
+  return new LRUCache<{ config: OpenClawConfig; mtime: number }>({
+    maxSize,
+    defaultTTL: cacheMs,
+    enableStats: true,
+  });
+}
+
+/**
+ * Get the config cache instance (lazy initialization)
+ */
+function getConfigCache(
+  env: NodeJS.ProcessEnv,
+): LRUCache<{ config: OpenClawConfig; mtime: number }> | null {
+  if (!shouldUseConfigCache(env)) {
+    return null;
+  }
+
+  if (!configCache) {
+    configCache = initializeConfigCache(env);
+  }
+
+  return configCache;
+}
+
+/**
+ * Clear the config cache
+ */
 export function clearConfigCache(): void {
   configCache = null;
+  configCacheStats = { hits: 0, misses: 0, hitRate: 0, size: 0 };
+}
+
+/**
+ * Get config cache statistics for monitoring
+ */
+export function getConfigCacheStats(): ConfigCacheStats {
+  if (!configCache) {
+    return { ...configCacheStats };
+  }
+
+  const stats = configCache.getStats();
+  return {
+    hits: stats.hits,
+    misses: stats.misses,
+    hitRate: stats.hitRate,
+    size: stats.size,
+  };
+}
+
+/**
+ * Get file modification time for cache invalidation
+ */
+function getFileMtime(filePath: string, fs: typeof import("node:fs")): number {
+  try {
+    const stats = fs.statSync(filePath);
+    return stats.mtimeMs;
+  } catch {
+    return 0;
+  }
 }
 
 export function loadConfig(): OpenClawConfig {
   const io = createConfigIO();
   const configPath = io.configPath;
-  const now = Date.now();
-  if (shouldUseConfigCache(process.env)) {
-    const cached = configCache;
-    if (cached && cached.configPath === configPath && cached.expiresAt > now) {
+  const cache = getConfigCache(process.env);
+
+  if (cache) {
+    // Get current file mtime for cache invalidation
+    const currentMtime = getFileMtime(configPath, fs);
+
+    // Try to get from cache with mtime validation
+    const cached = cache.get(configPath, { mtime: currentMtime });
+
+    if (cached) {
       return cached.config;
     }
   }
+
+  // Load config from disk
   const config = io.loadConfig();
-  if (shouldUseConfigCache(process.env)) {
-    const cacheMs = resolveConfigCacheMs(process.env);
-    if (cacheMs > 0) {
-      configCache = {
-        configPath,
-        expiresAt: now + cacheMs,
-        config,
-      };
-    }
+
+  // Store in cache with mtime
+  if (cache) {
+    const currentMtime = getFileMtime(configPath, fs);
+    cache.set(configPath, { config, mtime: currentMtime });
   }
+
   return config;
 }
 
@@ -1150,7 +1249,20 @@ export async function writeConfigFile(
   const io = createConfigIO();
   const sameConfigPath =
     options.expectedConfigPath === undefined || options.expectedConfigPath === io.configPath;
+
+  // Invalidate cache for this config file before writing
+  // This ensures subsequent reads get the fresh config
+  const cache = getConfigCache(process.env);
+  if (cache && sameConfigPath) {
+    cache.delete(io.configPath);
+  }
+
   await io.writeConfigFile(cfg, {
     envSnapshotForRestore: sameConfigPath ? options.envSnapshotForRestore : undefined,
   });
+
+  // Also invalidate after write to ensure consistency
+  if (cache && sameConfigPath) {
+    cache.delete(io.configPath);
+  }
 }
