@@ -16,6 +16,7 @@
  *   {@link createAuthRateLimiter} and pass it where needed.
  */
 
+import type { RedisRateLimiterConfig } from "./redis-rate-limit.js";
 import { isLoopbackAddress } from "./net.js";
 
 // ---------------------------------------------------------------------------
@@ -215,4 +216,43 @@ export function createAuthRateLimiter(config?: RateLimitConfig): AuthRateLimiter
   }
 
   return { check, recordFailure, reset, size, prune, dispose };
+}
+
+// ---------------------------------------------------------------------------
+// RateLimiter Factory
+// ---------------------------------------------------------------------------
+
+export interface RateLimiterFactoryConfig extends RateLimitConfig {
+  /** Redis URL (설정 시 Redis RateLimiter 사용) */
+  redisUrl?: string;
+  /** Redis 키 접두사 */
+  keyPrefix?: string;
+}
+
+/**
+ * 환경 변수 기반 RateLimiter 생성
+ * OPENCLAW_REDIS_URL 환경 변수가 설정된 경우 Redis RateLimiter 사용
+ */
+export async function createRateLimiter(
+  config?: RateLimiterFactoryConfig,
+): Promise<AuthRateLimiter> {
+  const redisUrl = config?.redisUrl ?? process.env.OPENCLAW_REDIS_URL;
+
+  if (redisUrl) {
+    try {
+      const { createRedisRateLimiter } = await import("./redis-rate-limit.js");
+      return await createRedisRateLimiter({
+        redisUrl,
+        maxAttempts: config?.maxAttempts,
+        windowMs: config?.windowMs,
+        lockoutMs: config?.lockoutMs,
+        exemptLoopback: config?.exemptLoopback,
+        keyPrefix: config?.keyPrefix,
+      });
+    } catch (err) {
+      console.error("Failed to create Redis rate limiter, falling back to memory:", err);
+    }
+  }
+
+  return createAuthRateLimiter(config);
 }
