@@ -273,4 +273,136 @@ describe("media store", () => {
       });
     });
   });
+
+  describe("path traversal protection", () => {
+    it("rejects originalFilename containing '..' sequence", async () => {
+      await withTempStore(async (store) => {
+        const buf = Buffer.from("test");
+
+        // Path traversal 시도: ../etc/passwd
+        await expect(
+          store.saveMediaBuffer(buf, "text/plain", "inbound", 5 * 1024 * 1024, "../etc/passwd"),
+        ).rejects.toThrow("Invalid filename: path traversal detected");
+
+        // Path traversal 시도: file..name.txt (중간에 .. 포함)
+        await expect(
+          store.saveMediaBuffer(buf, "text/plain", "inbound", 5 * 1024 * 1024, "file..name.txt"),
+        ).rejects.toThrow("Invalid filename: path traversal detected");
+
+        // Path traversal 시도: ..file.txt (시작에 .. 포함)
+        await expect(
+          store.saveMediaBuffer(buf, "text/plain", "inbound", 5 * 1024 * 1024, "..file.txt"),
+        ).rejects.toThrow("Invalid filename: path traversal detected");
+      });
+    });
+
+    it("rejects originalFilename containing path separators", async () => {
+      await withTempStore(async (store) => {
+        const buf = Buffer.from("test");
+
+        // Unix 경로 구분자
+        await expect(
+          store.saveMediaBuffer(buf, "text/plain", "inbound", 5 * 1024 * 1024, "path/to/file.txt"),
+        ).rejects.toThrow("Invalid filename: path traversal detected");
+
+        // Windows 경로 구분자
+        await expect(
+          store.saveMediaBuffer(
+            buf,
+            "text/plain",
+            "inbound",
+            5 * 1024 * 1024,
+            "path\\to\\file.txt",
+          ),
+        ).rejects.toThrow("Invalid filename: path traversal detected");
+
+        // 혼합된 경로 구분자
+        await expect(
+          store.saveMediaBuffer(buf, "text/plain", "inbound", 5 * 1024 * 1024, "path/to\\file.txt"),
+        ).rejects.toThrow("Invalid filename: path traversal detected");
+      });
+    });
+
+    it("rejects subdir containing path traversal sequences", async () => {
+      await withTempStore(async (store) => {
+        const buf = Buffer.from("test");
+
+        // Path traversal in subdir
+        await expect(
+          store.saveMediaBuffer(buf, "text/plain", "../etc", 5 * 1024 * 1024, "file.txt"),
+        ).rejects.toThrow("Invalid subdir: path traversal detected");
+
+        // Nested path traversal
+        await expect(
+          store.saveMediaBuffer(
+            buf,
+            "text/plain",
+            "inbound/../../etc",
+            5 * 1024 * 1024,
+            "file.txt",
+          ),
+        ).rejects.toThrow("Invalid subdir: path traversal detected");
+
+        // Multiple levels of path traversal
+        await expect(
+          store.saveMediaBuffer(buf, "text/plain", "a/b/../../../etc", 5 * 1024 * 1024, "file.txt"),
+        ).rejects.toThrow("Invalid subdir: path traversal detected");
+      });
+    });
+
+    it("allows safe filenames and subdirs", async () => {
+      await withTempStore(async (store) => {
+        const buf = Buffer.from("test content");
+
+        // Safe filename with dots
+        const saved1 = await store.saveMediaBuffer(
+          buf,
+          "text/plain",
+          "inbound",
+          5 * 1024 * 1024,
+          "my.file.name.txt",
+        );
+        expect(saved1.id).toMatch(/^my\.file\.name---[a-f0-9-]{36}\.txt$/);
+
+        // Safe filename with hyphen and underscore
+        const saved2 = await store.saveMediaBuffer(
+          buf,
+          "text/plain",
+          "inbound",
+          5 * 1024 * 1024,
+          "my-file_name.txt",
+        );
+        expect(saved2.id).toMatch(/^my-file_name---[a-f0-9-]{36}\.txt$/);
+
+        // Safe nested subdir
+        const saved3 = await store.saveMediaBuffer(
+          buf,
+          "text/plain",
+          "inbound/2024/documents",
+          5 * 1024 * 1024,
+          "report.txt",
+        );
+        expect(saved3.path).toContain("inbound");
+        expect(saved3.path).toContain("2024");
+        expect(saved3.path).toContain("documents");
+      });
+    });
+
+    it("rejects path traversal in saveMediaSource subdir", async () => {
+      await withTempStore(async (store, home) => {
+        const srcFile = path.join(home, "tmp-src.txt");
+        await fs.writeFile(srcFile, "local file");
+
+        // Path traversal in subdir should be rejected
+        await expect(store.saveMediaSource(srcFile, undefined, "../etc")).rejects.toThrow(
+          "Invalid subdir: path traversal detected",
+        );
+
+        // Nested path traversal
+        await expect(store.saveMediaSource(srcFile, undefined, "media/../../etc")).rejects.toThrow(
+          "Invalid subdir: path traversal detected",
+        );
+      });
+    });
+  });
 });

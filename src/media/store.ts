@@ -38,11 +38,16 @@ export function setMediaStoreNetworkDepsForTest(deps?: {
  * Sanitize a filename for cross-platform safety.
  * Removes chars unsafe on Windows/SharePoint/all platforms.
  * Keeps: alphanumeric, dots, hyphens, underscores, Unicode letters/numbers.
+ * Blocks path traversal attempts (.., /, \).
  */
 function sanitizeFilename(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) {
     return "";
+  }
+  // Path traversal 방지: '..' 시퀀스 및 경로 구분자 차단
+  if (trimmed.includes("..") || trimmed.includes("/") || trimmed.includes("\\")) {
+    throw new Error("Invalid filename: path traversal detected");
   }
   const sanitized = trimmed.replace(/[^\p{L}\p{N}._-]+/gu, "_");
   // Collapse multiple underscores, trim leading/trailing, limit length
@@ -194,6 +199,12 @@ export async function saveMediaSource(
 ): Promise<SavedMedia> {
   const baseDir = resolveMediaDir();
   const dir = subdir ? path.join(baseDir, subdir) : baseDir;
+
+  // Path traversal 방지: subdir 검증
+  if (!isPathWithinBase(baseDir, dir)) {
+    throw new Error("Invalid subdir: path traversal detected");
+  }
+
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   await cleanOldMedia();
   const baseId = crypto.randomUUID();
@@ -228,6 +239,27 @@ export async function saveMediaSource(
   return { id, path: dest, size: stat.size, contentType: mime };
 }
 
+/**
+ * Validate that the resolved path is within the allowed base directory.
+ * Prevents path traversal attacks by resolving the path and checking containment.
+ */
+function isPathWithinBase(baseDir: string, targetPath: string): boolean {
+  const resolvedBase = path.resolve(baseDir);
+  const resolvedTarget = path.resolve(targetPath);
+  return resolvedTarget.startsWith(resolvedBase + path.sep) || resolvedTarget === resolvedBase;
+}
+
+/**
+ * Validate filename for path traversal attempts before parsing.
+ * Checks the raw filename string for dangerous patterns.
+ */
+function validateOriginalFilename(filename: string): void {
+  // Path traversal 방지: 원본 파일명에서 '..' 시퀀스 및 경로 구분자 차단
+  if (filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
+    throw new Error("Invalid filename: path traversal detected");
+  }
+}
+
 export async function saveMediaBuffer(
   buffer: Buffer,
   contentType?: string,
@@ -238,7 +270,14 @@ export async function saveMediaBuffer(
   if (buffer.byteLength > maxBytes) {
     throw new Error(`Media exceeds ${(maxBytes / (1024 * 1024)).toFixed(0)}MB limit`);
   }
-  const dir = path.join(resolveMediaDir(), subdir);
+  const baseDir = resolveMediaDir();
+  const dir = path.join(baseDir, subdir);
+
+  // Path traversal 방지: subdir 검증
+  if (!isPathWithinBase(baseDir, dir)) {
+    throw new Error("Invalid subdir: path traversal detected");
+  }
+
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   const uuid = crypto.randomUUID();
   const headerExt = extensionForMime(contentType?.split(";")[0]?.trim() ?? undefined);
@@ -247,6 +286,8 @@ export async function saveMediaBuffer(
 
   let id: string;
   if (originalFilename) {
+    // Path traversal 방지: 원본 파일명 검증
+    validateOriginalFilename(originalFilename);
     // Embed original name: {sanitized}---{uuid}.ext
     const base = path.parse(originalFilename).name;
     const sanitized = sanitizeFilename(base);
@@ -257,6 +298,12 @@ export async function saveMediaBuffer(
   }
 
   const dest = path.join(dir, id);
+
+  // Path traversal 방지: 최종 경로 검증
+  if (!isPathWithinBase(dir, dest)) {
+    throw new Error("Invalid destination: path traversal detected");
+  }
+
   await fs.writeFile(dest, buffer, { mode: 0o600 });
   return { id, path: dest, size: buffer.byteLength, contentType: mime };
 }
