@@ -4,10 +4,20 @@ import type {
   DeviceTokenSummary,
   PairedDevice,
   PendingDevice,
+  TokenRotationResult,
 } from "../controllers/devices.ts";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "../controllers/exec-approvals.ts";
 import { formatRelativeTimestamp, formatList } from "../format.ts";
 import { renderExecApprovals, resolveExecApprovalsState } from "./nodes-exec-approvals.ts";
+
+// Token display state for masking UI (HIGH-002)
+type TokenDisplayState = {
+  token: string;
+  isVisible: boolean;
+  copySuccess: boolean;
+};
+
+const tokenDisplayStates = new Map<string, TokenDisplayState>();
 export type NodesProps = {
   loading: boolean;
   nodes: Array<Record<string, unknown>>;
@@ -31,7 +41,11 @@ export type NodesProps = {
   onDevicesRefresh: () => void;
   onDeviceApprove: (requestId: string) => void;
   onDeviceReject: (requestId: string) => void;
-  onDeviceRotate: (deviceId: string, role: string, scopes?: string[]) => void;
+  onDeviceRotate: (
+    deviceId: string,
+    role: string,
+    scopes?: string[],
+  ) => Promise<TokenRotationResult | null>;
   onDeviceRevoke: (deviceId: string, role: string) => void;
   onLoadConfig: () => void;
   onLoadExecApprovals: () => void;
@@ -182,19 +196,50 @@ function renderPairedDevice(device: PairedDevice, props: NodesProps) {
   `;
 }
 
+function maskToken(token: string): string {
+  if (token.length <= 8) {
+    return "***";
+  }
+  return token.slice(0, 4) + "****" + token.slice(-4);
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function renderTokenRow(deviceId: string, token: DeviceTokenSummary, props: NodesProps) {
   const status = token.revokedAtMs ? "revoked" : "active";
   const scopes = `scopes: ${formatList(token.scopes)}`;
   const when = formatRelativeTimestamp(
     token.rotatedAtMs ?? token.createdAtMs ?? token.lastUsedAtMs ?? null,
   );
+  const stateKey = `${deviceId}-${token.role}`;
+  const displayState = tokenDisplayStates.get(stateKey);
+
   return html`
     <div class="row" style="justify-content: space-between; gap: 8px;">
       <div class="list-sub">${token.role} · ${status} · ${scopes} · ${when}</div>
       <div class="row" style="justify-content: flex-end; gap: 6px; flex-wrap: wrap;">
         <button
           class="btn btn--sm"
-          @click=${() => props.onDeviceRotate(deviceId, token.role, token.scopes)}
+          @click=${async () => {
+            const result = await props.onDeviceRotate(deviceId, token.role, token.scopes);
+            if (result) {
+              // Store token in display state for masking UI
+              tokenDisplayStates.set(stateKey, {
+                token: result.token,
+                isVisible: false,
+                copySuccess: false,
+              });
+              // Trigger re-render
+              props.onDevicesRefresh();
+            }
+          }}
         >
           Rotate
         </button>
@@ -212,6 +257,79 @@ function renderTokenRow(deviceId: string, token: DeviceTokenSummary, props: Node
         }
       </div>
     </div>
+    ${
+      displayState
+        ? html`
+          <div
+            class="token-display"
+            style="margin-top: 8px; padding: 12px; background: var(--surface-elevated, #1a1a2e); border-radius: 8px; border: 1px solid var(--border-color, #333344);"
+            role="alert"
+            aria-live="polite"
+          >
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <span
+                class="token-value"
+                style="font-family: monospace; font-size: 14px; letter-spacing: 0.5px;"
+                aria-label="Device token"
+              >
+                ${displayState.isVisible ? displayState.token : maskToken(displayState.token)}
+              </span>
+              <div style="display: flex; gap: 8px;">
+                <button
+                  class="btn btn--sm"
+                  @click=${async () => {
+                    const success = await copyToClipboard(displayState.token);
+                    displayState.copySuccess = success;
+                    props.onDevicesRefresh();
+                    // Reset copy success after 2 seconds
+                    setTimeout(() => {
+                      displayState.copySuccess = false;
+                      props.onDevicesRefresh();
+                    }, 2000);
+                  }}
+                  aria-label="Copy token to clipboard"
+                >
+                  ${displayState.copySuccess ? "Copied!" : "Copy"}
+                </button>
+                <button
+                  class="btn btn--sm"
+                  @click=${() => {
+                    displayState.isVisible = !displayState.isVisible;
+                    props.onDevicesRefresh();
+                  }}
+                  aria-label=${displayState.isVisible ? "Hide token" : "Show token"}
+                >
+                  ${displayState.isVisible ? "Hide" : "Show"}
+                </button>
+                <button
+                  class="btn btn--sm"
+                  @click=${() => {
+                    tokenDisplayStates.delete(stateKey);
+                    props.onDevicesRefresh();
+                  }}
+                  aria-label="Dismiss token display"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+            ${
+              displayState.copySuccess
+                ? html`
+                    <div
+                      style="margin-top: 8px; font-size: 12px; color: var(--success-color, #10b981)"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      Token copied to clipboard. Store it securely.
+                    </div>
+                  `
+                : nothing
+            }
+          </div>
+        `
+        : nothing
+    }
   `;
 }
 

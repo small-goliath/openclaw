@@ -102,12 +102,19 @@ export async function rejectDevicePairing(state: DevicesState, requestId: string
   }
 }
 
+export type TokenRotationResult = {
+  token: string;
+  role: string;
+  deviceId: string;
+  scopes: string[];
+};
+
 export async function rotateDeviceToken(
   state: DevicesState,
   params: { deviceId: string; role: string; scopes?: string[] },
-) {
+): Promise<TokenRotationResult | null> {
   if (!state.client || !state.connected) {
-    return;
+    return null;
   }
   try {
     const res = await state.client.request<{
@@ -127,11 +134,22 @@ export async function rotateDeviceToken(
           scopes: res.scopes ?? params.scopes ?? [],
         });
       }
-      window.prompt("New device token (copy and store securely):", res.token);
+      // HIGH-002: Return token instead of showing window.prompt
+      // UI layer will handle secure display with masking
+      const result: TokenRotationResult = {
+        token: res.token,
+        role,
+        deviceId: res.deviceId ?? params.deviceId,
+        scopes: res.scopes ?? params.scopes ?? [],
+      };
+      await loadDevices(state);
+      return result;
     }
     await loadDevices(state);
+    return null;
   } catch (err) {
     state.devicesError = String(err);
+    return null;
   }
 }
 
