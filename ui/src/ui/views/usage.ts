@@ -1,5 +1,34 @@
 import { html, nothing } from "lit";
 import { extractQueryTerms, filterSessionsByQuery } from "../usage-helpers.ts";
+
+// Simple memoization cache for performance optimization (PERF-001~003)
+const memoCache = new Map<string, unknown>();
+
+function getMemoKey(prefix: string, deps: unknown[]): string {
+  return `${prefix}:${deps.map((d) => JSON.stringify(d)).join("|")}`;
+}
+
+function memoize<T>(key: string, factory: () => T, deps: unknown[]): T {
+  const memoKey = getMemoKey(key, deps);
+  const cached = memoCache.get(memoKey);
+  if (cached !== undefined) {
+    return cached as T;
+  }
+  const result = factory();
+  memoCache.set(memoKey, result);
+  // Limit cache size to prevent memory leaks
+  if (memoCache.size > 100) {
+    const firstKey = memoCache.keys().next().value;
+    if (firstKey) {
+      memoCache.delete(firstKey);
+    }
+  }
+  return result;
+}
+
+function clearMemoCache(): void {
+  memoCache.clear();
+}
 import {
   buildAggregatesFromSessions,
   buildPeakErrorHours,
@@ -100,29 +129,19 @@ export function renderUsage(props: UsageProps) {
   const hasDraftQuery = props.queryDraft.trim().length > 0;
   // (intentionally no global Clear button in the header; chips + query clear handle this)
 
-  // Sort sessions by tokens or cost depending on mode
-  const sortedSessions = [...props.sessions].toSorted((a, b) => {
-    const valA = isTokenMode ? (a.usage?.totalTokens ?? 0) : (a.usage?.totalCost ?? 0);
-    const valB = isTokenMode ? (b.usage?.totalTokens ?? 0) : (b.usage?.totalCost ?? 0);
-    return valB - valA;
-  });
+  // Sort sessions by tokens or cost depending on mode - with memoization (PERF-001)
+  const sortedSessions = memoize(
+    "sortedSessions",
+    () =>
+      [...props.sessions].toSorted((a, b) => {
+        const valA = isTokenMode ? (a.usage?.totalTokens ?? 0) : (a.usage?.totalCost ?? 0);
+        const valB = isTokenMode ? (b.usage?.totalTokens ?? 0) : (b.usage?.totalCost ?? 0);
+        return valB - valA;
+      }),
+    [props.sessions.length, isTokenMode, props.sessions.map((s) => s.key).join(",")],
+  );
 
-  // Filter sessions by selected days
-  const dayFilteredSessions =
-    props.selectedDays.length > 0
-      ? sortedSessions.filter((s) => {
-          if (s.usage?.activityDates?.length) {
-            return s.usage.activityDates.some((d) => props.selectedDays.includes(d));
-          }
-          if (!s.updatedAt) {
-            return false;
-          }
-          const d = new Date(s.updatedAt);
-          const sessionDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-          return props.selectedDays.includes(sessionDate);
-        })
-      : sortedSessions;
-
+  // Optimized filter chain - single pass when possible (PERF-002)
   const sessionTouchesHours = (session: UsageSessionEntry, hours: number[]): boolean => {
     if (hours.length === 0) {
       return true;
@@ -149,10 +168,52 @@ export function renderUsage(props: UsageProps) {
     return false;
   };
 
-  const hourFilteredSessions =
-    props.selectedHours.length > 0
-      ? dayFilteredSessions.filter((s) => sessionTouchesHours(s, props.selectedHours))
-      : dayFilteredSessions;
+  // Combined filter for days and hours - single pass optimization
+  const filteredSessionsByTime = memoize(
+    "filteredSessionsByTime",
+    () => {
+      // Early return if no filters
+      if (props.selectedDays.length === 0 && props.selectedHours.length === 0) {
+        return sortedSessions;
+      }
+
+      return sortedSessions.filter((s) => {
+        // Check days filter
+        if (props.selectedDays.length > 0) {
+          let matchesDay = false;
+          if (s.usage?.activityDates?.length) {
+            matchesDay = s.usage.activityDates.some((d) => props.selectedDays.includes(d));
+          } else if (s.updatedAt) {
+            const d = new Date(s.updatedAt);
+            const sessionDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+            matchesDay = props.selectedDays.includes(sessionDate);
+          }
+          if (!matchesDay) {
+            return false;
+          }
+        }
+
+        // Check hours filter
+        if (props.selectedHours.length > 0) {
+          if (!sessionTouchesHours(s, props.selectedHours)) {
+            return false;
+          }
+        }
+
+        return true;
+      });
+    },
+    [
+      sortedSessions.map((s) => s.key).join(","),
+      props.selectedDays.join(","),
+      props.selectedHours.join(","),
+      props.timeZone,
+    ],
+  );
+
+  // Keep backward compatibility
+  const dayFilteredSessions = filteredSessionsByTime;
+  const hourFilteredSessions = filteredSessionsByTime;
 
   // Filter sessions by query (client-side)
   const queryResult = filterSessionsByQuery(hourFilteredSessions, props.query);
@@ -171,7 +232,9 @@ export function renderUsage(props: UsageProps) {
       .map((term) => term.value)
       .filter(Boolean);
   };
-  const unique = (items: Array<string | undefined>) => {
+
+  // Memoized unique function for options (PERF-004)
+  const unique = (items: Array<string | undefined>): string[] => {
     const set = new Set<string>();
     for (const item of items) {
       if (item) {
@@ -180,20 +243,48 @@ export function renderUsage(props: UsageProps) {
     }
     return Array.from(set);
   };
-  const agentOptions = unique(sortedSessions.map((s) => s.agentId)).slice(0, 12);
-  const channelOptions = unique(sortedSessions.map((s) => s.channel)).slice(0, 12);
-  const providerOptions = unique([
-    ...sortedSessions.map((s) => s.modelProvider),
-    ...sortedSessions.map((s) => s.providerOverride),
-    ...(props.aggregates?.byProvider.map((entry) => entry.provider) ?? []),
-  ]).slice(0, 12);
-  const modelOptions = unique([
-    ...sortedSessions.map((s) => s.model),
-    ...(props.aggregates?.byModel.map((entry) => entry.model) ?? []),
-  ]).slice(0, 12);
-  const toolOptions = unique(props.aggregates?.tools.tools.map((tool) => tool.name) ?? []).slice(
-    0,
-    12,
+
+  // Memoized options computation
+  const agentOptions = memoize(
+    "agentOptions",
+    () => unique(sortedSessions.map((s) => s.agentId)).slice(0, 12),
+    [sortedSessions.map((s) => s.agentId).join(",")],
+  );
+  const channelOptions = memoize(
+    "channelOptions",
+    () => unique(sortedSessions.map((s) => s.channel)).slice(0, 12),
+    [sortedSessions.map((s) => s.channel).join(",")],
+  );
+  const providerOptions = memoize(
+    "providerOptions",
+    () =>
+      unique([
+        ...sortedSessions.map((s) => s.modelProvider),
+        ...sortedSessions.map((s) => s.providerOverride),
+        ...(props.aggregates?.byProvider.map((entry) => entry.provider) ?? []),
+      ]).slice(0, 12),
+    [
+      sortedSessions.map((s) => s.modelProvider).join(","),
+      sortedSessions.map((s) => s.providerOverride).join(","),
+      props.aggregates?.byProvider.map((e) => e.provider).join(","),
+    ],
+  );
+  const modelOptions = memoize(
+    "modelOptions",
+    () =>
+      unique([
+        ...sortedSessions.map((s) => s.model),
+        ...(props.aggregates?.byModel.map((entry) => entry.model) ?? []),
+      ]).slice(0, 12),
+    [
+      sortedSessions.map((s) => s.model).join(","),
+      props.aggregates?.byModel.map((e) => e.model).join(","),
+    ],
+  );
+  const toolOptions = memoize(
+    "toolOptions",
+    () => unique(props.aggregates?.tools.tools.map((tool) => tool.name) ?? []).slice(0, 12),
+    [props.aggregates?.tools.tools.map((t) => t.name).join(",")],
   );
 
   // Get first selected session for detail view (timeseries, logs)
@@ -203,9 +294,18 @@ export function renderUsage(props: UsageProps) {
         filteredSessions.find((s) => s.key === props.selectedSessions[0]))
       : null;
 
-  // Compute totals from sessions
+  // Compute totals from sessions - with memoization (PERF-003)
   const computeSessionTotals = (sessions: UsageSessionEntry[]): UsageTotals => {
-    return sessions.reduce(
+    const cacheKey = getMemoKey(
+      "sessionTotals",
+      sessions.map((s) => s.key),
+    );
+    const cached = memoCache.get(cacheKey) as UsageTotals | undefined;
+    if (cached) {
+      return cached;
+    }
+
+    const result = sessions.reduce(
       (acc, s) => {
         if (s.usage) {
           acc.input += s.usage.input;
@@ -236,6 +336,9 @@ export function renderUsage(props: UsageProps) {
         missingCostEntries: 0,
       },
     );
+
+    memoCache.set(cacheKey, result);
+    return result;
   };
 
   // Compute totals from daily data for selected days (more accurate than session totals)
@@ -299,15 +402,31 @@ export function renderUsage(props: UsageProps) {
     displaySessionCount = totalSessions;
   }
 
-  const aggregateSessions =
-    props.selectedSessions.length > 0
-      ? filteredSessions.filter((s) => props.selectedSessions.includes(s.key))
-      : hasQuery || props.selectedHours.length > 0
-        ? filteredSessions
-        : props.selectedDays.length > 0
-          ? dayFilteredSessions
-          : sortedSessions;
-  const activeAggregates = buildAggregatesFromSessions(aggregateSessions, props.aggregates);
+  // Memoized aggregateSessions and activeAggregates (PERF-005)
+  const aggregateSessions = memoize(
+    "aggregateSessions",
+    () =>
+      props.selectedSessions.length > 0
+        ? filteredSessions.filter((s) => props.selectedSessions.includes(s.key))
+        : hasQuery || props.selectedHours.length > 0
+          ? filteredSessions
+          : props.selectedDays.length > 0
+            ? dayFilteredSessions
+            : sortedSessions,
+    [
+      props.selectedSessions.join(","),
+      filteredSessions.map((s) => s.key).join(","),
+      hasQuery,
+      props.selectedHours.join(","),
+      props.selectedDays.join(","),
+    ],
+  );
+
+  const activeAggregates = memoize(
+    "activeAggregates",
+    () => buildAggregatesFromSessions(aggregateSessions, props.aggregates),
+    [aggregateSessions.map((s) => s.key).join(","), JSON.stringify(props.aggregates)],
+  );
 
   // Filter daily chart data if sessions are selected
   const filteredDaily =
@@ -328,7 +447,16 @@ export function renderUsage(props: UsageProps) {
         })()
       : props.costDaily;
 
-  const insightStats = buildUsageInsightStats(aggregateSessions, displayTotals, activeAggregates);
+  // Memoized insightStats (PERF-005)
+  const insightStats = memoize(
+    "insightStats",
+    () => buildUsageInsightStats(aggregateSessions, displayTotals, activeAggregates),
+    [
+      aggregateSessions.map((s) => s.key).join(","),
+      JSON.stringify(displayTotals),
+      JSON.stringify(activeAggregates),
+    ],
+  );
   const isEmpty = !props.loading && !props.totals && props.sessions.length === 0;
   const hasMissingCost =
     (displayTotals?.missingCostEntries ?? 0) > 0 ||
