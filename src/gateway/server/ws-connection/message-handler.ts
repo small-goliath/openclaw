@@ -67,7 +67,7 @@ import {
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
-const DEVICE_SIGNATURE_SKEW_MS = 10 * 60 * 1000;
+const DEVICE_SIGNATURE_SKEW_MS = 30 * 1000; // 30 seconds - HIGH-003: reduced from 10 minutes to prevent replay attacks
 
 export function attachGatewayWsMessageHandler(params: {
   socket: WebSocket;
@@ -340,10 +340,39 @@ export function attachGatewayWsMessageHandler(params: {
         const hasTokenAuth = Boolean(connectParams.auth?.token);
         const hasPasswordAuth = Boolean(connectParams.auth?.password);
         const hasSharedAuth = hasTokenAuth || hasPasswordAuth;
+
+        // Production environment detection for security hardening (CRIT-001, CRIT-002)
+        const isProduction = process.env.NODE_ENV === "production";
+
+        // Dangerous auth settings are completely disabled in production
         const allowInsecureControlUi =
-          isControlUi && configSnapshot.gateway?.controlUi?.allowInsecureAuth === true;
-        const disableControlUiDeviceAuth =
-          isControlUi && configSnapshot.gateway?.controlUi?.dangerouslyDisableDeviceAuth === true;
+          !isProduction &&
+          isControlUi &&
+          configSnapshot.gateway?.controlUi?.allowInsecureAuth === true;
+        const disableControlUiDeviceAuth = false; // production에서 절대 허용 금지
+
+        // Log warnings if dangerous settings are configured in production
+        if (isProduction && isControlUi) {
+          if (configSnapshot.gateway?.controlUi?.allowInsecureAuth === true) {
+            logWsControl.warn(
+              `SECURITY: allowInsecureAuth is set to true but ignored in production environment. ` +
+                `Authentication bypass is not allowed in production.`,
+            );
+          }
+          if (configSnapshot.gateway?.controlUi?.dangerouslyDisableDeviceAuth === true) {
+            logWsControl.warn(
+              `SECURITY: dangerouslyDisableDeviceAuth is set to true but ignored in production environment. ` +
+                `Device authentication is mandatory in production.`,
+            );
+          }
+          if (process.env.DANGEROUSLY_DISABLE_DEVICE_AUTH || process.env.ALLOW_INSECURE_AUTH) {
+            logWsControl.warn(
+              `SECURITY: Dangerous auth environment variables detected in production. ` +
+                `These variables are ignored. All authentication requirements are enforced.`,
+            );
+          }
+        }
+
         const allowControlUiBypass = allowInsecureControlUi || disableControlUiDeviceAuth;
         const device = disableControlUiDeviceAuth ? null : deviceRaw;
 
@@ -492,10 +521,11 @@ export function attachGatewayWsMessageHandler(params: {
             return;
           }
           const signedAt = device.signedAt;
-          if (
-            typeof signedAt !== "number" ||
-            Math.abs(Date.now() - signedAt) > DEVICE_SIGNATURE_SKEW_MS
-          ) {
+          // HIGH-003: Time skew check with local client exception
+          const isTimeValid =
+            typeof signedAt === "number" &&
+            (isLocalClient || Math.abs(Date.now() - signedAt) <= DEVICE_SIGNATURE_SKEW_MS);
+          if (!isTimeValid) {
             setHandshakeState("failed");
             setCloseCause("device-auth-invalid", {
               reason: "device-signature-stale",

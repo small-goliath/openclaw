@@ -5,6 +5,9 @@
 
 import type { AuthRateLimiter, RateLimitCheckResult, RateLimitConfig } from "./auth-rate-limit.js";
 
+// Web Crypto API for IP hashing (Node.js 20+ compatible)
+const crypto = globalThis.crypto;
+
 // Redis 클라이언트 타입 (동적 import용)
 type RedisClient = {
   get(key: string): Promise<string | null>;
@@ -83,6 +86,9 @@ export class RedisRateLimiter implements AuthRateLimiter {
   private redis: RedisClient;
   private config: Required<RateLimitConfig>;
   private keyPrefix: string;
+  private failCloseCount: number = 0;
+  private lastFailureTime: number | null = null;
+  private isRedisHealthy: boolean = true;
 
   constructor(redis: RedisClient, config: RedisRateLimiterConfig) {
     this.redis = redis;
@@ -135,10 +141,26 @@ export class RedisRateLimiter implements AuthRateLimiter {
         retryAfterMs: 0,
       };
     } catch (err) {
-      // Redis 오류 시 허용 (fail-open) 또는 차단 (fail-close) 정책 선택 가능
-      // 여기서는 fail-open으로 설정
-      console.error("Redis rate limit check failed:", err);
-      return { allowed: true, remaining: this.config.maxAttempts, retryAfterMs: 0 };
+      // Redis 오류 시 차단 (fail-close) 정책 - DoS 공격 방어
+      // CRIT-003: Redis 장애 시에도 rate limiting이 무효화되지 않도록 함
+      const errorType = this.classifyRedisError(err);
+      const timestamp = new Date().toISOString();
+      const clientIpHash = ip ? await this.hashIpForLogging(ip) : "unknown";
+
+      console.error(`[${timestamp}] Redis rate limit check failed (${errorType}):`, err);
+      console.error(`  Scope: ${scope ?? "default"}, IP Hash: ${clientIpHash}`);
+
+      // 메트릭 업데이트
+      this.failCloseCount++;
+      this.lastFailureTime = Date.now();
+      this.isRedisHealthy = false;
+
+      // Fail-close: Redis 장애 시 요청 차단
+      return {
+        allowed: false,
+        remaining: 0,
+        retryAfterMs: this.config.lockoutMs,
+      };
     }
   }
 
@@ -172,7 +194,15 @@ export class RedisRateLimiter implements AuthRateLimiter {
         });
       }
     } catch (err) {
-      console.error("Redis rate limit record failure failed:", err);
+      const errorType = this.classifyRedisError(err);
+      const timestamp = new Date().toISOString();
+      const clientIpHash = ip ? await this.hashIpForLogging(ip) : "unknown";
+
+      console.error(`[${timestamp}] Redis rate limit record failure failed (${errorType}):`, err);
+      console.error(`  Scope: ${scope ?? "default"}, IP Hash: ${clientIpHash}`);
+
+      // 메트릭 업데이트
+      this.isRedisHealthy = false;
     }
   }
 
@@ -203,6 +233,71 @@ export class RedisRateLimiter implements AuthRateLimiter {
    */
   prune(): void {
     // Redis TTL로 자동 관리됨
+  }
+
+  /**
+   * Redis 에러 분류
+   */
+  private classifyRedisError(err: unknown): string {
+    if (err instanceof Error) {
+      const message = err.message.toLowerCase();
+      if (message.includes("econnrefused") || message.includes("connect")) {
+        return "RedisConnectionError";
+      }
+      if (message.includes("timeout") || message.includes("etimedout")) {
+        return "RedisTimeoutError";
+      }
+      if (message.includes("auth") || message.includes("noauth")) {
+        return "RedisAuthError";
+      }
+      if (message.includes("oom") || message.includes("memory")) {
+        return "RedisMemoryError";
+      }
+      return "RedisError";
+    }
+    return "UnknownError";
+  }
+
+  /**
+   * 로깅용 IP 해시 (개인정보 보호)
+   */
+  private async hashIpForLogging(ip: string): Promise<string> {
+    try {
+      const data = new TextEncoder().encode(ip);
+      const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      // 처음 16바이트만 사용하여 반환
+      return hashArray
+        .slice(0, 16)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+    } catch {
+      return "hash-error";
+    }
+  }
+
+  /**
+   * 메트릭 조회 (모니터링용)
+   */
+  getMetrics(): {
+    failCloseCount: number;
+    lastFailureTime: number | null;
+    isRedisHealthy: boolean;
+    config: RateLimitConfig;
+  } {
+    return {
+      failCloseCount: this.failCloseCount,
+      lastFailureTime: this.lastFailureTime,
+      isRedisHealthy: this.isRedisHealthy,
+      config: { ...this.config },
+    };
+  }
+
+  /**
+   * Redis 상태 업데이트 (복구 시 호출)
+   */
+  markRedisHealthy(): void {
+    this.isRedisHealthy = true;
   }
 
   /**
