@@ -836,3 +836,400 @@ export async function saveExportToFile(
 export function calculateExportSize(exportData: UserDataExport): number {
   return JSON.stringify(exportData).length;
 }
+
+// COMP-003: 데이터 보유 기간 자동화 설정
+export interface DataRetentionConfig {
+  /** 세션 데이터 보유 기간 (일) */
+  sessionRetentionDays: number;
+  /** 트랜스크립트 보유 기간 (일) */
+  transcriptRetentionDays: number;
+  /** 감사 로그 보유 기간 (일) */
+  auditLogRetentionDays: number;
+  /** 메모리 데이터 보유 기간 (일) */
+  memoryRetentionDays: number;
+  /** 삭제 전 백업 여부 */
+  backupBeforeDelete: boolean;
+  /** 백업 경로 */
+  backupPath?: string;
+}
+
+/** 기본 보유 기간 설정 (GDPR 권고) */
+export const DEFAULT_RETENTION_CONFIG: DataRetentionConfig = {
+  sessionRetentionDays: 30,
+  transcriptRetentionDays: 365,
+  auditLogRetentionDays: 1095, // 3년
+  memoryRetentionDays: 365,
+  backupBeforeDelete: true,
+  backupPath: "./backups/data-retention",
+};
+
+/** 삭제 결과 */
+export interface PurgeResult {
+  timestamp: string;
+  deletedSessions: number;
+  deletedTranscripts: number;
+  deletedAuditLogs: number;
+  deletedMemories: number;
+  backupPath?: string;
+  errors: string[];
+}
+
+/**
+ * 만료된 데이터 자동 삭제 (COMP-003)
+ * GDPR Article 5(1)(e) - 보유 기간 제한 준수
+ */
+export async function purgeExpiredData(
+  config: Partial<DataRetentionConfig> = {},
+): Promise<PurgeResult> {
+  const retentionConfig = { ...DEFAULT_RETENTION_CONFIG, ...config };
+  const result: PurgeResult = {
+    timestamp: new Date().toISOString(),
+    deletedSessions: 0,
+    deletedTranscripts: 0,
+    deletedAuditLogs: 0,
+    deletedMemories: 0,
+    errors: [],
+  };
+
+  const now = Date.now();
+  log.info("Starting expired data purge", { config: retentionConfig });
+
+  // 백업 생성
+  if (retentionConfig.backupBeforeDelete && retentionConfig.backupPath) {
+    try {
+      result.backupPath = await createDataBackup(retentionConfig.backupPath);
+      log.info("Data backup created", { backupPath: result.backupPath });
+    } catch (error) {
+      log.error("Failed to create backup", { error: String(error) });
+      result.errors.push(`Backup failed: ${String(error)}`);
+      // 백업 실패 시 삭제 중단 (안전 장치)
+      if (retentionConfig.backupBeforeDelete) {
+        throw new Error("Backup failed, aborting purge", { cause: error });
+      }
+    }
+  }
+
+  // 세션 데이터 정리
+  try {
+    const sessionCutoff = new Date(
+      now - retentionConfig.sessionRetentionDays * 24 * 60 * 60 * 1000,
+    );
+    result.deletedSessions = await purgeExpiredSessions(sessionCutoff);
+    log.info("Purged expired sessions", { count: result.deletedSessions });
+  } catch (error) {
+    log.error("Failed to purge sessions", { error: String(error) });
+    result.errors.push(`Session purge failed: ${String(error)}`);
+  }
+
+  // 트랜스크립트 정리
+  try {
+    const transcriptCutoff = new Date(
+      now - retentionConfig.transcriptRetentionDays * 24 * 60 * 60 * 1000,
+    );
+    result.deletedTranscripts = await purgeExpiredTranscripts(transcriptCutoff);
+    log.info("Purged expired transcripts", { count: result.deletedTranscripts });
+  } catch (error) {
+    log.error("Failed to purge transcripts", { error: String(error) });
+    result.errors.push(`Transcript purge failed: ${String(error)}`);
+  }
+
+  // 감사 로그 정리
+  try {
+    const auditCutoff = new Date(now - retentionConfig.auditLogRetentionDays * 24 * 60 * 60 * 1000);
+    result.deletedAuditLogs = await purgeExpiredAuditLogs(auditCutoff);
+    log.info("Purged expired audit logs", { count: result.deletedAuditLogs });
+  } catch (error) {
+    log.error("Failed to purge audit logs", { error: String(error) });
+    result.errors.push(`Audit log purge failed: ${String(error)}`);
+  }
+
+  // 메모리 데이터 정리
+  try {
+    const memoryCutoff = new Date(now - retentionConfig.memoryRetentionDays * 24 * 60 * 60 * 1000);
+    result.deletedMemories = await purgeExpiredMemories(memoryCutoff);
+    log.info("Purged expired memories", { count: result.deletedMemories });
+  } catch (error) {
+    log.error("Failed to purge memories", { error: String(error) });
+    result.errors.push(`Memory purge failed: ${String(error)}`);
+  }
+
+  // 삭제 로그 기록
+  await logPurgeResult(result);
+
+  log.info("Expired data purge completed", { result });
+  return result;
+}
+
+/**
+ * 데이터 백업 생성
+ */
+async function createDataBackup(backupBasePath: string): Promise<string> {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = path.join(backupBasePath, `backup-${timestamp}`);
+
+  await fs.mkdir(backupPath, { recursive: true });
+
+  const config = loadConfig();
+
+  // 세션 백업
+  try {
+    const sessionPath = getSessionStorePath(config);
+    const sessionBackupPath = path.join(backupPath, "sessions");
+    await fs.mkdir(sessionBackupPath, { recursive: true });
+    await copyFileIfExists(sessionPath, path.join(sessionBackupPath, "sessions.json"));
+  } catch (error) {
+    log.warn("Session backup skipped", { error: String(error) });
+  }
+
+  // 트랜스크립트 백업
+  try {
+    const transcriptDir = resolveConfigPath(config.session?.transcriptDir ?? "./transcripts");
+    const transcriptBackupPath = path.join(backupPath, "transcripts");
+    await copyDirectoryIfExists(transcriptDir, transcriptBackupPath);
+  } catch (error) {
+    log.warn("Transcript backup skipped", { error: String(error) });
+  }
+
+  // 감사 로그 백업
+  try {
+    const auditLogPath = resolveConfigPath(config.logging?.auditLogPath ?? "./logs/audit.jsonl");
+    const auditBackupPath = path.join(backupPath, "audit");
+    await fs.mkdir(auditBackupPath, { recursive: true });
+    await copyFileIfExists(auditLogPath, path.join(auditBackupPath, "audit.jsonl"));
+  } catch (error) {
+    log.warn("Audit log backup skipped", { error: String(error) });
+  }
+
+  // 메모리 백업
+  try {
+    const memoryDir = resolveConfigPath(config.memory?.basePath ?? "./memory");
+    const memoryBackupPath = path.join(backupPath, "memory");
+    await copyDirectoryIfExists(memoryDir, memoryBackupPath);
+  } catch (error) {
+    log.warn("Memory backup skipped", { error: String(error) });
+  }
+
+  return backupPath;
+}
+
+/**
+ * 파일이 존재하면 복사
+ */
+async function copyFileIfExists(src: string, dest: string): Promise<void> {
+  try {
+    await fs.access(src);
+    await fs.copyFile(src, dest);
+  } catch {
+    // 파일이 없으면 무시
+  }
+}
+
+/**
+ * 디렉토리가 존재하면 복사
+ */
+async function copyDirectoryIfExists(src: string, dest: string): Promise<void> {
+  try {
+    await fs.access(src);
+    await fs.mkdir(dest, { recursive: true });
+    const entries = await fs.readdir(src, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+
+      if (entry.isDirectory()) {
+        await copyDirectoryIfExists(srcPath, destPath);
+      } else {
+        await fs.copyFile(srcPath, destPath);
+      }
+    }
+  } catch {
+    // 디렉토리가 없으면 무시
+  }
+}
+
+/**
+ * 만료된 세션 정리
+ */
+async function purgeExpiredSessions(cutoffDate: Date): Promise<number> {
+  try {
+    const config = loadConfig();
+    const storePath = getSessionStorePath(config);
+    const store = loadSessionStore(storePath);
+
+    let deletedCount = 0;
+    const updatedStore: Record<string, SessionEntry> = {};
+
+    for (const [key, entry] of Object.entries(store)) {
+      if (entry.updatedAt && entry.updatedAt < cutoffDate.getTime()) {
+        deletedCount++;
+      } else {
+        updatedStore[key] = entry;
+      }
+    }
+
+    if (deletedCount > 0) {
+      const { saveSessionStore } = await import("../config/sessions/store.js");
+      await saveSessionStore(storePath, updatedStore);
+    }
+
+    return deletedCount;
+  } catch (error) {
+    log.error("Failed to purge sessions", { error: String(error) });
+    throw error;
+  }
+}
+
+/**
+ * 만료된 트랜스크립트 정리
+ */
+async function purgeExpiredTranscripts(cutoffDate: Date): Promise<number> {
+  try {
+    const config = loadConfig();
+    const transcriptDir = resolveConfigPath(config.session?.transcriptDir ?? "./transcripts");
+    const files = await findTranscriptFiles(transcriptDir);
+
+    let deletedCount = 0;
+
+    for (const filePath of files) {
+      try {
+        const stats = await fs.stat(filePath);
+        if (stats.mtime < cutoffDate) {
+          await fs.unlink(filePath);
+          deletedCount++;
+        }
+      } catch (error) {
+        log.warn(`Failed to delete transcript: ${filePath}`, { error: String(error) });
+      }
+    }
+
+    return deletedCount;
+  } catch (error) {
+    log.error("Failed to purge transcripts", { error: String(error) });
+    throw error;
+  }
+}
+
+/**
+ * 만료된 감사 로그 정리
+ */
+async function purgeExpiredAuditLogs(cutoffDate: Date): Promise<number> {
+  try {
+    const config = loadConfig();
+    const auditLogPath = resolveConfigPath(config.logging?.auditLogPath ?? "./logs/audit.jsonl");
+
+    let content: string;
+    try {
+      content = await fs.readFile(auditLogPath, "utf-8");
+    } catch {
+      return 0; // 파일이 없으면 0 반환
+    }
+
+    const lines = content.split("\n").filter((line) => line.trim());
+    const keptLines: string[] = [];
+    let deletedCount = 0;
+
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line) as AuditLogEntry;
+        const entryDate = new Date(entry.timestamp);
+
+        if (entryDate >= cutoffDate) {
+          keptLines.push(line);
+        } else {
+          deletedCount++;
+        }
+      } catch {
+        // 잘못된 JSON은 유지
+        keptLines.push(line);
+      }
+    }
+
+    if (deletedCount > 0) {
+      await fs.writeFile(
+        auditLogPath,
+        keptLines.join("\n") + (keptLines.length > 0 ? "\n" : ""),
+        "utf-8",
+      );
+    }
+
+    return deletedCount;
+  } catch (error) {
+    log.error("Failed to purge audit logs", { error: String(error) });
+    throw error;
+  }
+}
+
+/**
+ * 만료된 메모리 정리
+ */
+async function purgeExpiredMemories(cutoffDate: Date): Promise<number> {
+  try {
+    const config = loadConfig();
+    const memoryDir = resolveConfigPath(config.memory?.basePath ?? "./memory");
+    const files = await findMemoryFiles(memoryDir);
+
+    let deletedCount = 0;
+
+    for (const filePath of files) {
+      try {
+        const stats = await fs.stat(filePath);
+        if (stats.mtime < cutoffDate) {
+          await fs.unlink(filePath);
+          deletedCount++;
+        }
+      } catch (error) {
+        log.warn(`Failed to delete memory: ${filePath}`, { error: String(error) });
+      }
+    }
+
+    return deletedCount;
+  } catch (error) {
+    log.error("Failed to purge memories", { error: String(error) });
+    throw error;
+  }
+}
+
+/**
+ * 삭제 로그 기록
+ */
+async function logPurgeResult(result: PurgeResult): Promise<void> {
+  const logEntry = {
+    timestamp: result.timestamp,
+    type: "data-retention-purge",
+    deletedSessions: result.deletedSessions,
+    deletedTranscripts: result.deletedTranscripts,
+    deletedAuditLogs: result.deletedAuditLogs,
+    deletedMemories: result.deletedMemories,
+    backupPath: result.backupPath,
+    errorCount: result.errors.length,
+  };
+
+  // 콘솔에 로그 출력 (추후 파일 로깅으로 확장 가능)
+  log.info("Data retention purge completed", logEntry);
+}
+
+/**
+ * Cron 작업용 데이터 정리 함수
+ * node-cron 등으로 주기적 호출 가능
+ */
+export async function runDataRetentionJob(
+  config?: Partial<DataRetentionConfig>,
+): Promise<PurgeResult> {
+  log.info("Starting scheduled data retention job");
+
+  try {
+    const result = await purgeExpiredData(config);
+
+    if (result.errors.length > 0) {
+      log.warn("Data retention job completed with errors", { errors: result.errors });
+    } else {
+      log.info("Data retention job completed successfully");
+    }
+
+    return result;
+  } catch (error) {
+    log.error("Data retention job failed", { error: String(error) });
+    throw error;
+  }
+}

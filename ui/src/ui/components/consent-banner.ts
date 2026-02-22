@@ -828,11 +828,11 @@ export class ConsentBanner extends LitElement {
           </div>
 
           <div class="banner-actions">
-            <button class="btn btn-primary" @click="${this.acceptAll}">
-              모두 수락
-            </button>
             <button class="btn btn-secondary" @click="${this.acceptNecessaryOnly}">
               필수만 수락
+            </button>
+            <button class="btn btn-secondary" @click="${this.acceptAll}">
+              모두 수락
             </button>
             <button class="btn btn-ghost" @click="${this.savePreferencesAndClose}">
               설정 저장

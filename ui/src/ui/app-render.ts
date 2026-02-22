@@ -778,7 +778,7 @@ export function renderApp(state: AppViewState) {
                   onDevicesRefresh: () => loadDevices(state),
                   onDeviceApprove: (requestId) => approveDevicePairing(state, requestId),
                   onDeviceReject: (requestId) => rejectDevicePairing(state, requestId),
-                  onDeviceRotate: (deviceId, role, scopes) =>
+                  onDeviceRotate: async (deviceId, role, scopes) =>
                     rotateDeviceToken(state, { deviceId, role, scopes }),
                   onDeviceRevoke: (deviceId, role) => revokeDeviceToken(state, { deviceId, role }),
                   onLoadConfig: () => loadConfig(state),
