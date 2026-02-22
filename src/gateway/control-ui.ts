@@ -84,6 +84,70 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
+/**
+ * CSP 위반 보고서 수신 엔드포인트 (SEC-003)
+ * 브라우저에서 CSP 위반이 발생하면 이 엔드포인트로 보고됨
+ */
+export function handleCspReport(req: IncomingMessage, res: ServerResponse): boolean {
+  if (req.method !== "POST") {
+    return false;
+  }
+
+  const url = new URL(req.url ?? "/", "http://localhost");
+  if (url.pathname !== "/api/csp-report") {
+    return false;
+  }
+
+  let body = "";
+  req.on("data", (chunk: Buffer) => {
+    body += chunk.toString();
+  });
+
+  req.on("end", () => {
+    try {
+      const report = JSON.parse(body);
+      const cspReport = report["csp-report"] || report;
+
+      // 구조화된 로깅
+      const logEntry = {
+        timestamp: new Date().toISOString(),
+        type: "csp-violation",
+        documentUri: cspReport["document-uri"] || cspReport.documentUri,
+        referrer: cspReport.referrer,
+        blockedUri: cspReport["blocked-uri"] || cspReport.blockedUri,
+        violatedDirective: cspReport["violated-directive"] || cspReport.violatedDirective,
+        effectiveDirective: cspReport["effective-directive"] || cspReport.effectiveDirective,
+        originalPolicy: cspReport["original-policy"] || cspReport.originalPolicy,
+        disposition: cspReport.disposition,
+        statusCode: cspReport["status-code"] || cspReport.statusCode,
+        sample: cspReport.sample,
+        sourceFile: cspReport["source-file"] || cspReport.sourceFile,
+        lineNumber: cspReport["line-number"] || cspReport.lineNumber,
+        columnNumber: cspReport["column-number"] || cspReport.columnNumber,
+      };
+
+      // 보안 로그에 기록
+      console.error("[CSP Violation]", JSON.stringify(logEntry));
+
+      // 204 No Content 응답 (보고서 수신 확인)
+      res.statusCode = 204;
+      res.end();
+    } catch (error) {
+      console.error("[CSP Report Error] Failed to parse report:", error);
+      res.statusCode = 400;
+      res.end("Bad Request");
+    }
+  });
+
+  req.on("error", (error) => {
+    console.error("[CSP Report Error] Request error:", error);
+    res.statusCode = 500;
+    res.end("Internal Server Error");
+  });
+
+  return true;
+}
+
 function isValidAgentId(agentId: string): boolean {
   return /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(agentId);
 }

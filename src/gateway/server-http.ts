@@ -41,6 +41,7 @@ import {
 import {
   handleControlUiAvatarRequest,
   handleControlUiHttpRequest,
+  handleCspReport,
   type ControlUiRootState,
 } from "./control-ui.js";
 import { applyHookMappings } from "./hooks-mapping.js";
@@ -673,6 +674,11 @@ export function createGatewayHttpServer(opts: {
         ) {
           return;
         }
+        // CSP 위반 보고서 수신 엔드포인트 (SEC-003)
+        if (handleCspReport(req, res)) {
+          return;
+        }
+
         if (
           handleControlUiHttpRequest(req, res, {
             basePath: controlUiBasePath,

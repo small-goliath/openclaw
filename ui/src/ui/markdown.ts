@@ -37,10 +37,43 @@ const allowedTags = [
 ];
 
 const allowedAttrs = ["class", "href", "rel", "target", "title", "start", "src", "alt"];
+
+// SEC-001: DOMPurify configuration hardening
+// - ADD_DATA_URI_TAGS: [] - Disable data URI images to prevent XSS
+// - FORBID_ATTR: Event handlers that could execute JavaScript
+// - FORBID_TAGS: script and style tags completely blocked
 const sanitizeOptions = {
   ALLOWED_TAGS: allowedTags,
   ALLOWED_ATTR: allowedAttrs,
-  ADD_DATA_URI_TAGS: ["img"],
+  ADD_DATA_URI_TAGS: [] as string[], // Empty array - data URI images disabled
+  FORBID_ATTR: [
+    "onerror",
+    "onload",
+    "onmouseover",
+    "onclick",
+    "onmouseenter",
+    "onmouseleave",
+    "onfocus",
+    "onblur",
+    "onchange",
+    "onsubmit",
+    "onreset",
+    "onselect",
+    "onkeydown",
+    "onkeypress",
+    "onkeyup",
+  ],
+  FORBID_TAGS: [
+    "script",
+    "style",
+    "iframe",
+    "object",
+    "embed",
+    "form",
+    "input",
+    "textarea",
+    "button",
+  ],
 };
 
 let hooksInstalled = false;
