@@ -125,6 +125,8 @@ export function renderSessions(props: SessionsProps) {
         <label class="field">
           <span>Active within (minutes)</span>
           <input
+            type="number"
+            aria-label="Active within minutes"
             .value=${props.activeMinutes}
             @input=${(e: Event) =>
               props.onFiltersChange({
@@ -138,6 +140,8 @@ export function renderSessions(props: SessionsProps) {
         <label class="field">
           <span>Limit</span>
           <input
+            type="number"
+            aria-label="Session limit"
             .value=${props.limit}
             @input=${(e: Event) =>
               props.onFiltersChange({
@@ -152,6 +156,7 @@ export function renderSessions(props: SessionsProps) {
           <span>Include global</span>
           <input
             type="checkbox"
+            aria-label="Include global sessions"
             .checked=${props.includeGlobal}
             @change=${(e: Event) =>
               props.onFiltersChange({
@@ -166,6 +171,7 @@ export function renderSessions(props: SessionsProps) {
           <span>Include unknown</span>
           <input
             type="checkbox"
+            aria-label="Include unknown sessions"
             .checked=${props.includeUnknown}
             @change=${(e: Event) =>
               props.onFiltersChange({
@@ -188,27 +194,31 @@ export function renderSessions(props: SessionsProps) {
         ${props.result ? `Store: ${props.result.path}` : ""}
       </div>
 
-      <div class="table" style="margin-top: 16px;">
-        <div class="table-head">
-          <div>Key</div>
-          <div>Label</div>
-          <div>Kind</div>
-          <div>Updated</div>
-          <div>Tokens</div>
-          <div>Thinking</div>
-          <div>Verbose</div>
-          <div>Reasoning</div>
-          <div>Actions</div>
+      <div class="table" role="table" aria-label="Sessions list" style="margin-top: 16px;">
+        <div class="table-head" role="rowgroup">
+          <div role="row">
+            <div role="columnheader" scope="col" id="col-key">Key</div>
+            <div role="columnheader" scope="col" id="col-label">Label</div>
+            <div role="columnheader" scope="col" id="col-kind">Kind</div>
+            <div role="columnheader" scope="col" id="col-updated">Updated</div>
+            <div role="columnheader" scope="col" id="col-tokens">Tokens</div>
+            <div role="columnheader" scope="col" id="col-thinking">Thinking</div>
+            <div role="columnheader" scope="col" id="col-verbose">Verbose</div>
+            <div role="columnheader" scope="col" id="col-reasoning">Reasoning</div>
+            <div role="columnheader" scope="col" id="col-actions">Actions</div>
+          </div>
         </div>
-        ${
-          rows.length === 0
-            ? html`
-                <div class="muted">No sessions found.</div>
-              `
-            : rows.map((row) =>
-                renderRow(row, props.basePath, props.onPatch, props.onDelete, props.loading),
-              )
-        }
+        <div role="rowgroup">
+          ${
+            rows.length === 0
+              ? html`
+                  <div role="status" class="muted">No sessions found.</div>
+                `
+              : rows.map((row) =>
+                  renderRow(row, props.basePath, props.onPatch, props.onDelete, props.loading),
+                )
+          }
+        </div>
       </div>
     </section>
   `;
@@ -242,13 +252,15 @@ function renderRow(
     : null;
 
   return html`
-    <div class="table-row">
-      <div class="mono session-key-cell">
+    <div class="table-row" role="row" aria-labelledby="session-${row.key}">
+      <div class="mono session-key-cell" role="cell" headers="col-key" id="session-${row.key}">
         ${canLink ? html`<a href=${chatUrl} class="session-link">${row.key}</a>` : row.key}
         ${showDisplayName ? html`<span class="muted session-key-display-name">${displayName}</span>` : nothing}
       </div>
-      <div>
+      <div role="cell" headers="col-label">
         <input
+          type="text"
+          aria-label="Session label for ${row.key}"
           .value=${row.label ?? ""}
           ?disabled=${disabled}
           placeholder="(optional)"
@@ -258,11 +270,12 @@ function renderRow(
           }}
         />
       </div>
-      <div>${row.kind}</div>
-      <div>${updated}</div>
-      <div>${formatSessionTokens(row)}</div>
-      <div>
+      <div role="cell" headers="col-kind">${row.kind}</div>
+      <div role="cell" headers="col-updated">${updated}</div>
+      <div role="cell" headers="col-tokens">${formatSessionTokens(row)}</div>
+      <div role="cell" headers="col-thinking">
         <select
+          aria-label="Thinking level for ${row.key}"
           ?disabled=${disabled}
           @change=${(e: Event) => {
             const value = (e.target as HTMLSelectElement).value;
@@ -279,8 +292,9 @@ function renderRow(
           )}
         </select>
       </div>
-      <div>
+      <div role="cell" headers="col-verbose">
         <select
+          aria-label="Verbose level for ${row.key}"
           ?disabled=${disabled}
           @change=${(e: Event) => {
             const value = (e.target as HTMLSelectElement).value;
@@ -295,8 +309,9 @@ function renderRow(
           )}
         </select>
       </div>
-      <div>
+      <div role="cell" headers="col-reasoning">
         <select
+          aria-label="Reasoning level for ${row.key}"
           ?disabled=${disabled}
           @change=${(e: Event) => {
             const value = (e.target as HTMLSelectElement).value;
@@ -311,8 +326,13 @@ function renderRow(
           )}
         </select>
       </div>
-      <div>
-        <button class="btn danger" ?disabled=${disabled} @click=${() => onDelete(row.key)}>
+      <div role="cell" headers="col-actions">
+        <button
+          class="btn danger"
+          aria-label="Delete session ${row.key}"
+          ?disabled=${disabled}
+          @click=${() => onDelete(row.key)}
+        >
           Delete
         </button>
       </div>

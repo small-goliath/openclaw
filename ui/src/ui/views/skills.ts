@@ -212,6 +212,16 @@ function renderSkill(skill: SkillStatusEntry, props: SkillsProps) {
               : nothing
           }
         </div>
+        <!-- A11Y-003: Live region for dynamic content updates -->
+        <div
+          role="status"
+          aria-live="${message?.kind === "error" ? "assertive" : "polite"}"
+          aria-atomic="true"
+          class="skill-message-region"
+          style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;"
+        >
+          ${message ? message.message : nothing}
+        </div>
         ${
           message
             ? html`<div
@@ -221,6 +231,7 @@ function renderSkill(skill: SkillStatusEntry, props: SkillsProps) {
                   ? "var(--danger-color, #d14343)"
                   : "var(--success-color, #0a7f5a)"
               };"
+              aria-hidden="true"
             >
               ${message.message}
             </div>`
