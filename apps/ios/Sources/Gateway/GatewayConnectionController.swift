@@ -62,7 +62,7 @@ final class GatewayConnectionController {
         let token = GatewaySettingsStore.loadGatewayToken(instanceId: instanceId)
         let password = GatewaySettingsStore.loadGatewayPassword(instanceId: instanceId)
         guard let host = self.resolveGatewayHost(gateway) else { return }
-        let port = gateway.gatewayPort ?? 18789
+        let port = gateway.gatewayPort ?? 40104
         let tlsParams = self.resolveDiscoveredTLSParams(gateway: gateway)
         guard let url = self.buildGatewayURL(
             host: host,
@@ -255,7 +255,7 @@ final class GatewayConnectionController {
         }) {
             guard let target = self.gateways.first(where: { $0.stableID == targetStableID }) else { return }
             guard let host = self.resolveGatewayHost(target) else { return }
-            let port = target.gatewayPort ?? 18789
+            let port = target.gatewayPort ?? 40104
             let tlsParams = self.resolveDiscoveredTLSParams(gateway: target)
             guard let url = self.buildGatewayURL(host: host, port: port, useTLS: tlsParams?.required == true)
             else { return }
@@ -272,7 +272,7 @@ final class GatewayConnectionController {
 
         if self.gateways.count == 1, let gateway = self.gateways.first {
             guard let host = self.resolveGatewayHost(gateway) else { return }
-            let port = gateway.gatewayPort ?? 18789
+            let port = gateway.gatewayPort ?? 40104
             let tlsParams = self.resolveDiscoveredTLSParams(gateway: gateway)
             guard let url = self.buildGatewayURL(host: host, port: port, useTLS: tlsParams?.required == true)
             else { return }
@@ -438,7 +438,7 @@ final class GatewayConnectionController {
         if useTLS && self.shouldForceTLS(host: trimmedHost) {
             return 443
         }
-        return 18789
+        return 40104
     }
 
     private func resolvedDisplayName(defaults: UserDefaults) -> String {

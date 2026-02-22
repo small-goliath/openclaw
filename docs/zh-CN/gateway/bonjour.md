@@ -75,7 +75,7 @@ dig @<TAILNET_IPV4> -p 53 _openclaw-gw._tcp.openclaw.internal PTR +short
 
 ### Gateway 网关监听器安全（推荐）
 
-Gateway 网关 WS 端口（默认 `18789`）默认绑定到 loopback。对于局域网/Tailnet
+Gateway 网关 WS 端口（默认 `40104`）默认绑定到 loopback。对于局域网/Tailnet
 访问，请明确绑定并保持认证启用。
 
 对于仅 Tailnet 的设置：

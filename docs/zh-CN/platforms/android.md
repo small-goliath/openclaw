@@ -32,7 +32,7 @@ x-i18n:
 
 Android 节点应用 ⇄（mDNS/NSD + WebSocket）⇄ **Gateway 网关**
 
-Android 直接连接到 Gateway 网关 WebSocket（默认 `ws://<host>:18789`）并使用 Gateway 网关拥有的配对。
+Android 直接连接到 Gateway 网关 WebSocket（默认 `ws://<host>:40104`）并使用 Gateway 网关拥有的配对。
 
 ### 前置条件
 
@@ -46,12 +46,12 @@ Android 直接连接到 Gateway 网关 WebSocket（默认 `ws://<host>:18789`）
 ### 1）启动 Gateway 网关
 
 ```bash
-openclaw gateway --port 18789 --verbose
+openclaw gateway --port 40104 --verbose
 ```
 
 在日志中确认你看到类似内容：
 
-- `listening on ws://0.0.0.0:18789`
+- `listening on ws://0.0.0.0:40104`
 
 对于仅 tailnet 设置（推荐用于维也纳 ⇄ 伦敦），将 Gateway 网关绑定到 tailnet IP：
 

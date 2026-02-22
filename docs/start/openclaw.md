@@ -52,7 +52,7 @@ openclaw channels login
 2. Start the Gateway (leave it running):
 
 ```bash
-openclaw gateway --port 18789
+openclaw gateway --port 40104
 ```
 
 3. Put a minimal config in `~/.openclaw/openclaw.json`:

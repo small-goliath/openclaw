@@ -12,7 +12,7 @@ The Gateway dashboard is the browser Control UI served at `/` by default
 
 Quick open (local Gateway):
 
-- [http://127.0.0.1:18789/](http://127.0.0.1:18789/) (or [http://localhost:18789/](http://localhost:18789/))
+- [http://127.0.0.1:40104/](http://127.0.0.1:40104/) (or [http://localhost:40104/](http://localhost:40104/))
 
 Key references:
 
@@ -35,12 +35,12 @@ Prefer localhost, Tailscale Serve, or an SSH tunnel.
 
 ## Token basics (local vs remote)
 
-- **Localhost**: open `http://127.0.0.1:18789/`.
+- **Localhost**: open `http://127.0.0.1:40104/`.
 - **Token source**: `gateway.auth.token` (or `OPENCLAW_GATEWAY_TOKEN`); the UI stores a copy in localStorage after you connect.
 - **Not localhost**: use Tailscale Serve (tokenless if `gateway.auth.allowTailscale: true`), tailnet bind with a token, or an SSH tunnel. See [Web surfaces](/web).
 
 ## If you see “unauthorized” / 1008
 
-- Ensure the gateway is reachable (local: `openclaw status`; remote: SSH tunnel `ssh -N -L 18789:127.0.0.1:18789 user@host` then open `http://127.0.0.1:18789/`).
+- Ensure the gateway is reachable (local: `openclaw status`; remote: SSH tunnel `ssh -N -L 40104:127.0.0.1:40104 user@host` then open `http://127.0.0.1:40104/`).
 - Retrieve the token from the gateway host: `openclaw config get gateway.auth.token` (or generate one: `openclaw doctor --generate-gateway-token`).
 - In the dashboard settings, paste the token into the auth field, then connect.

@@ -24,7 +24,7 @@ struct SettingsTab: View {
     @AppStorage("gateway.autoconnect") private var gatewayAutoConnect: Bool = false
     @AppStorage("gateway.manual.enabled") private var manualGatewayEnabled: Bool = false
     @AppStorage("gateway.manual.host") private var manualGatewayHost: String = ""
-    @AppStorage("gateway.manual.port") private var manualGatewayPort: Int = 18789
+    @AppStorage("gateway.manual.port") private var manualGatewayPort: Int = 40104
     @AppStorage("gateway.manual.tls") private var manualGatewayTLS: Bool = true
     @AppStorage("gateway.discovery.debugLogs") private var discoveryDebugLogsEnabled: Bool = false
     @AppStorage("canvas.debugStatusEnabled") private var canvasDebugStatusEnabled: Bool = false
@@ -178,7 +178,7 @@ struct SettingsTab: View {
 
                         Text(
                             "Use this when mDNS/Bonjour discovery is blocked. "
-                                + "Leave port empty for 443 on tailnet DNS (TLS) or 18789 otherwise.")
+                                + "Leave port empty for 443 on tailnet DNS (TLS) or 40104 otherwise.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 
@@ -695,7 +695,7 @@ struct SettingsTab: View {
         if self.manualGatewayTLS && trimmed.lowercased().hasSuffix(".ts.net") {
             return 443
         }
-        return 18789
+        return 40104
     }
 
     private func preflightGateway(host: String, port: Int, useTLS: Bool) async -> Bool {

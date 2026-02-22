@@ -14,7 +14,7 @@ This repo supports “remote over SSH” by keeping a single Gateway (the master
 
 ## The core idea
 
-- The Gateway WebSocket binds to **loopback** on your configured port (defaults to 18789).
+- The Gateway WebSocket binds to **loopback** on your configured port (defaults to 40104).
 - For remote use, you forward that loopback port over SSH (or use a tailnet/VPN and tunnel less).
 
 ## Common VPN/tailnet setups (where the agent lives)
@@ -71,15 +71,15 @@ Notes:
 Create a local tunnel to the remote Gateway WS:
 
 ```bash
-ssh -N -L 18789:127.0.0.1:18789 user@host
+ssh -N -L 40104:127.0.0.1:40104 user@host
 ```
 
 With the tunnel up:
 
-- `openclaw health` and `openclaw status --deep` now reach the remote gateway via `ws://127.0.0.1:18789`.
+- `openclaw health` and `openclaw status --deep` now reach the remote gateway via `ws://127.0.0.1:40104`.
 - `openclaw gateway {status,health,send,agent,call}` can also target the forwarded URL via `--url` when needed.
 
-Note: replace `18789` with your configured `gateway.port` (or `--port`/`OPENCLAW_GATEWAY_PORT`).
+Note: replace `40104` with your configured `gateway.port` (or `--port`/`OPENCLAW_GATEWAY_PORT`).
 Note: when you pass `--url`, the CLI does not fall back to config or environment credentials.
 Include `--token` or `--password` explicitly. Missing explicit credentials is an error.
 
@@ -92,20 +92,20 @@ You can persist a remote target so CLI commands use it by default:
   gateway: {
     mode: "remote",
     remote: {
-      url: "ws://127.0.0.1:18789",
+      url: "ws://127.0.0.1:40104",
       token: "your-token",
     },
   },
 }
 ```
 
-When the gateway is loopback-only, keep the URL at `ws://127.0.0.1:18789` and open the SSH tunnel first.
+When the gateway is loopback-only, keep the URL at `ws://127.0.0.1:40104` and open the SSH tunnel first.
 
 ## Chat UI over SSH
 
 WebChat no longer uses a separate HTTP port. The SwiftUI chat UI connects directly to the Gateway WebSocket.
 
-- Forward `18789` over SSH (see above), then connect clients to `ws://127.0.0.1:18789`.
+- Forward `40104` over SSH (see above), then connect clients to `ws://127.0.0.1:40104`.
 - On macOS, prefer the app’s “Remote over SSH” mode, which manages the tunnel automatically.
 
 ## macOS app “Remote over SSH”

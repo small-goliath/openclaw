@@ -79,7 +79,7 @@ Google Chat webhooks 需要一个公网 HTTPS 端点。为了安全起见，**�
 1. **检查你的 Gateway 网关绑定的地址：**
 
    ```bash
-   ss -tlnp | grep 18789
+   ss -tlnp | grep 40104
    ```
 
    记下 IP 地址（例如 `127.0.0.1`、`0.0.0.0` 或你的 Tailscale IP 如 `100.x.x.x`）。
@@ -88,20 +88,20 @@ Google Chat webhooks 需要一个公网 HTTPS 端点。为了安全起见，**�
 
    ```bash
    # 如果绑定到 localhost（127.0.0.1 或 0.0.0.0）：
-   tailscale serve --bg --https 8443 http://127.0.0.1:18789
+   tailscale serve --bg --https 8443 http://127.0.0.1:40104
 
    # 如果仅绑定到 Tailscale IP（例如 100.106.161.80）：
-   tailscale serve --bg --https 8443 http://100.106.161.80:18789
+   tailscale serve --bg --https 8443 http://100.106.161.80:40104
    ```
 
 3. **仅公开暴露 webhook 路径：**
 
    ```bash
    # 如果绑定到 localhost（127.0.0.1 或 0.0.0.0）：
-   tailscale funnel --bg --set-path /googlechat http://127.0.0.1:18789/googlechat
+   tailscale funnel --bg --set-path /googlechat http://127.0.0.1:40104/googlechat
 
    # 如果仅绑定到 Tailscale IP（例如 100.106.161.80）：
-   tailscale funnel --bg --set-path /googlechat http://100.106.161.80:18789/googlechat
+   tailscale funnel --bg --set-path /googlechat http://100.106.161.80:40104/googlechat
    ```
 
 4. **授权节点访问 Funnel：**
@@ -129,7 +129,7 @@ Google Chat webhooks 需要一个公网 HTTPS 端点。为了安全起见，**�
 
 ```caddy
 your-domain.com {
-    reverse_proxy /googlechat* localhost:18789
+    reverse_proxy /googlechat* localhost:40104
 }
 ```
 
@@ -139,7 +139,7 @@ your-domain.com {
 
 配置你的隧道入口规则，只路由 webhook 路径：
 
-- **路径**：`/googlechat` -> `http://localhost:18789/googlechat`
+- **路径**：`/googlechat` -> `http://localhost:40104/googlechat`
 - **默认规则**：HTTP 404（未找到）
 
 ## 工作原理

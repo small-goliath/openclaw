@@ -319,7 +319,7 @@ curl -fsSL https://openclaw.ai/install.sh | bash
 openclaw onboard --install-daemon
 ```
 
-The wizard can also build UI assets automatically. After onboarding, you typically run the Gateway on port **18789**.
+The wizard can also build UI assets automatically. After onboarding, you typically run the Gateway on port **40104**.
 
 From source (contributors/dev):
 
@@ -342,15 +342,15 @@ The wizard opens your browser with a clean (non-tokenized) dashboard URL right a
 
 **Localhost (same machine):**
 
-- Open `http://127.0.0.1:18789/`.
+- Open `http://127.0.0.1:40104/`.
 - If it asks for auth, paste the token from `gateway.auth.token` (or `OPENCLAW_GATEWAY_TOKEN`) into Control UI settings.
 - Retrieve it from the gateway host: `openclaw config get gateway.auth.token` (or generate one: `openclaw doctor --generate-gateway-token`).
 
 **Not on localhost:**
 
 - **Tailscale Serve** (recommended): keep bind loopback, run `openclaw gateway --tailscale serve`, open `https://<magicdns>/`. If `gateway.auth.allowTailscale` is `true`, identity headers satisfy auth (no token).
-- **Tailnet bind**: run `openclaw gateway --bind tailnet --token "<token>"`, open `http://<tailscale-ip>:18789/`, paste token in dashboard settings.
-- **SSH tunnel**: `ssh -N -L 18789:127.0.0.1:18789 user@host` then open `http://127.0.0.1:18789/` and paste the token in Control UI settings.
+- **Tailnet bind**: run `openclaw gateway --bind tailnet --token "<token>"`, open `http://<tailscale-ip>:40104/`, paste token in dashboard settings.
+- **SSH tunnel**: `ssh -N -L 40104:127.0.0.1:40104 user@host` then open `http://127.0.0.1:40104/` and paste the token in Control UI settings.
 
 See [Dashboard](/web/dashboard) and [Web surfaces](/web) for bind modes and auth details.
 
@@ -1640,7 +1640,7 @@ Minimal steps:
    - In the Tailscale admin console, enable MagicDNS so the VPS has a stable name.
 4. **Use the tailnet hostname**
    - SSH: `ssh user@your-vps.tailnet-xxxx.ts.net`
-   - Gateway WS: `ws://your-vps.tailnet-xxxx.ts.net:18789`
+   - Gateway WS: `ws://your-vps.tailnet-xxxx.ts.net:40104`
 
 If you want the Control UI without SSH, use Tailscale Serve on the VPS:
 
@@ -2351,7 +2351,7 @@ The wizard explicitly supports Anthropic setup-token and OpenAI Codex OAuth and 
 Precedence:
 
 ```
---port > OPENCLAW_GATEWAY_PORT > gateway.port > default 18789
+--port > OPENCLAW_GATEWAY_PORT > gateway.port > default 40104
 ```
 
 ### Why does openclaw gateway status say Runtime running but RPC probe failed
@@ -2378,7 +2378,7 @@ Run that from the same `--profile` / environment you want the service to use.
 
 ### What does another gateway instance is already listening mean
 
-OpenClaw enforces a runtime lock by binding the WebSocket listener immediately on startup (default `ws://127.0.0.1:18789`). If the bind fails with `EADDRINUSE`, it throws `GatewayLockError` indicating another instance is already listening.
+OpenClaw enforces a runtime lock by binding the WebSocket listener immediately on startup (default `ws://127.0.0.1:40104`). If the bind fails with `EADDRINUSE`, it throws `GatewayLockError` indicating another instance is already listening.
 
 Fix: stop the other instance, free the port, or run with `openclaw gateway --port <port>`.
 
@@ -2391,7 +2391,7 @@ Set `gateway.mode: "remote"` and point to a remote WebSocket URL, optionally wit
   gateway: {
     mode: "remote",
     remote: {
-      url: "ws://gateway.tailnet:18789",
+      url: "ws://gateway.tailnet:40104",
       token: "your-token",
       password: "your-password",
     },
@@ -2416,7 +2416,7 @@ Fix:
 
 - Fastest: `openclaw dashboard` (prints + copies the dashboard URL, tries to open; shows SSH hint if headless).
 - If you don't have a token yet: `openclaw doctor --generate-gateway-token`.
-- If remote, tunnel first: `ssh -N -L 18789:127.0.0.1:18789 user@host` then open `http://127.0.0.1:18789/`.
+- If remote, tunnel first: `ssh -N -L 40104:127.0.0.1:40104 user@host` then open `http://127.0.0.1:40104/`.
 - Set `gateway.auth.token` (or `OPENCLAW_GATEWAY_TOKEN`) on the gateway host.
 - In the Control UI settings, paste the same token.
 - Still stuck? Run `openclaw status --all` and follow [Troubleshooting](/gateway/troubleshooting). See [Dashboard](/web/dashboard) for auth details.
@@ -2466,14 +2466,14 @@ Common causes:
 
 Quick fixes:
 
-1. Use the WS URL: `ws://<host>:18789` (or `wss://...` if HTTPS).
+1. Use the WS URL: `ws://<host>:40104` (or `wss://...` if HTTPS).
 2. Don't open the WS port in a normal browser tab.
 3. If auth is on, include the token/password in the `connect` frame.
 
 If you're using the CLI or TUI, the URL should look like:
 
 ```
-openclaw tui --url ws://<host>:18789 --token <token>
+openclaw tui --url ws://<host>:40104 --token <token>
 ```
 
 Protocol details: [Gateway protocol](/gateway/protocol).

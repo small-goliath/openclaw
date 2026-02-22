@@ -1886,7 +1886,7 @@ See [Plugins](/tools/plugin).
 {
   gateway: {
     mode: "local", // local | remote
-    port: 18789,
+    port: 40104,
     bind: "loopback",
     auth: {
       mode: "token", // token | password
@@ -1912,7 +1912,7 @@ See [Plugins](/tools/plugin).
       // dangerouslyDisableDeviceAuth: false,
     },
     remote: {
-      url: "ws://gateway.tailnet:18789",
+      url: "ws://gateway.tailnet:40104",
       transport: "ssh", // ssh | direct
       token: "your-token",
       // password: "your-password",
@@ -1931,7 +1931,7 @@ See [Plugins](/tools/plugin).
 <Accordion title="Gateway field details">
 
 - `mode`: `local` (run gateway) or `remote` (connect to remote gateway). Gateway refuses to start unless `local`.
-- `port`: single multiplexed port for WS + HTTP. Precedence: `--port` > `OPENCLAW_GATEWAY_PORT` > `gateway.port` > `18789`.
+- `port`: single multiplexed port for WS + HTTP. Precedence: `--port` > `OPENCLAW_GATEWAY_PORT` > `gateway.port` > `40104`.
 - `bind`: `auto`, `loopback` (default), `lan` (`0.0.0.0`), `tailnet` (Tailscale IP only), or `custom`.
 - **Auth**: required by default. Non-loopback binds require a shared token/password. Onboarding wizard generates a token by default.
 - `auth.allowTailscale`: when `true`, Tailscale Serve identity headers satisfy auth (verified via `tailscale whois`). Defaults to `true` when `tailscale.mode = "serve"`.
@@ -2039,7 +2039,7 @@ Auth: `Authorization: Bearer <token>` or `x-openclaw-token: <token>`.
       topic: "projects/<project-id>/topics/gog-gmail-watch",
       subscription: "gog-gmail-watch-push",
       pushToken: "shared-push-token",
-      hookUrl: "http://127.0.0.1:18789/hooks/gmail",
+      hookUrl: "http://127.0.0.1:40104/hooks/gmail",
       includeBody: true,
       maxBytes: 20000,
       renewEveryMinutes: 720,
@@ -2323,7 +2323,7 @@ Split config into multiple files:
 ```json5
 // ~/.openclaw/openclaw.json
 {
-  gateway: { port: 18789 },
+  gateway: { port: 40104 },
   agents: { $include: "./agents.json5" },
   broadcast: {
     $include: ["./clients/mueller.json5", "./clients/schmidt.json5"],

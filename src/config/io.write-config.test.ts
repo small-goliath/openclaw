@@ -83,7 +83,7 @@ describe("config io write", () => {
       await fs.mkdir(path.dirname(configPath), { recursive: true });
       await fs.writeFile(
         configPath,
-        JSON.stringify({ gateway: { port: 18789 } }, null, 2),
+        JSON.stringify({ gateway: { port: 40104 } }, null, 2),
         "utf-8",
       );
 
@@ -109,7 +109,7 @@ describe("config io write", () => {
         unknown
       >;
       expect(persisted.gateway).toEqual({
-        port: 18789,
+        port: 40104,
         auth: { mode: "token" },
       });
       expect(persisted).not.toHaveProperty("agents.defaults");
@@ -138,7 +138,7 @@ describe("config io write", () => {
                 },
               },
             },
-            gateway: { port: 18789 },
+            gateway: { port: 40104 },
           },
           null,
           2,
@@ -171,7 +171,7 @@ describe("config io write", () => {
         "${OPENAI_API_KEY}",
       );
       expect(persisted.gateway).toEqual({
-        port: 18789,
+        port: 40104,
         auth: { mode: "token" },
       });
     });
@@ -256,7 +256,7 @@ describe("config io write", () => {
       await fs.mkdir(path.dirname(configPath), { recursive: true });
       await fs.writeFile(
         configPath,
-        JSON.stringify({ gateway: { port: 18789 } }, null, 2),
+        JSON.stringify({ gateway: { port: 40104 } }, null, 2),
         "utf-8",
       );
       const warn = vi.fn();
@@ -319,7 +319,7 @@ describe("config io write", () => {
       await fs.mkdir(path.dirname(configPath), { recursive: true });
       await fs.writeFile(
         configPath,
-        JSON.stringify({ gateway: { port: 18789 } }, null, 2),
+        JSON.stringify({ gateway: { port: 40104 } }, null, 2),
         "utf-8",
       );
 

@@ -8,10 +8,10 @@ import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-cha
 import { VERSION } from "../version.js";
 import { ensureNodeHostConfig, saveNodeHostConfig, type NodeHostGatewayConfig } from "./config.js";
 import {
+  buildNodeInvokeResultParams,
   coerceNodeInvokePayload,
   handleInvoke,
   type SkillBinsProvider,
-  buildNodeInvokeResultParams,
 } from "./invoke.js";
 
 export { buildNodeInvokeResultParams };
@@ -99,7 +99,7 @@ export async function runNodeHost(opts: NodeHostRunOptions): Promise<void> {
     (isRemoteMode ? cfg.gateway?.remote?.password : cfg.gateway?.auth?.password);
 
   const host = gateway.host ?? "127.0.0.1";
-  const port = gateway.port ?? 18789;
+  const port = gateway.port ?? 40104;
   const scheme = gateway.tls ? "wss" : "ws";
   const url = `${scheme}://${host}:${port}`;
   const pathEnv = ensureNodePathEnv();

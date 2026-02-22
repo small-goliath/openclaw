@@ -163,7 +163,7 @@ scripts/sandbox-setup.sh
 ```json5
 // ~/.openclaw/openclaw.json
 {
-  gateway: { port: 18789 },
+  gateway: { port: 40104 },
 
   // 包含单个文件（替换该键的值）
   agents: { $include: "./agents.json5" },
@@ -233,7 +233,7 @@ scripts/sandbox-setup.sh
 ```json5
 // ~/.openclaw/openclaw.json
 {
-  gateway: { port: 18789, auth: { token: "secret" } },
+  gateway: { port: 40104, auth: { token: "secret" } },
 
   // 通用智能体默认值
   agents: {
@@ -2881,13 +2881,13 @@ OpenClaw 可以为 OpenClaw 启动一个**专用、隔离的** Chrome/Brave/Edge
 
 - mode：**未设置**（视为"不自动启动"）
 - bind：`loopback`
-- port：`18789`（WS + HTTP 单端口）
+- port：`40104`（WS + HTTP 单端口）
 
 ```json5
 {
   gateway: {
     mode: "local", // 或 "remote"
-    port: 18789, // WS + HTTP 多路复用
+    port: 40104, // WS + HTTP 多路复用
     bind: "loopback",
     // controlUi: { enabled: true, basePath: "/openclaw" }
     // auth: { mode: "token", token: "your-token" } // token 控制 WS + 控制台 UI 访问
@@ -2923,7 +2923,7 @@ OpenClaw 可以为 OpenClaw 启动一个**专用、隔离的** Chrome/Brave/Edge
 - `openclaw gateway` 拒绝启动，除非 `gateway.mode` 设为 `local`（或你传递了覆盖标志）。
 - `gateway.port` 控制用于 WebSocket + HTTP（控制台 UI、hooks、A2UI）的单一多路复用端口。
 - OpenAI Chat Completions 端点：**默认禁用**；通过 `gateway.http.endpoints.chatCompletions.enabled: true` 启用。
-- 优先级：`--port` > `OPENCLAW_GATEWAY_PORT` > `gateway.port` > 默认 `18789`。
+- 优先级：`--port` > `OPENCLAW_GATEWAY_PORT` > `gateway.port` > 默认 `40104`。
 - 默认需要 Gateway 网关认证（token/密码或 Tailscale Serve 身份）。非 local loopback 绑定需要共享 token/密码。
 - 新手引导向导默认生成 gateway token（即使在 local loopback 上）。
 - `gateway.remote.token` **仅**用于远程 CLI 调用；它不启用本地 gateway 认证。`gateway.token` 被忽略。
@@ -2947,7 +2947,7 @@ OpenClaw 可以为 OpenClaw 启动一个**专用、隔离的** Chrome/Brave/Edge
 远程客户端默认值（CLI）：
 
 - `gateway.remote.url` 设置 `gateway.mode = "remote"` 时 CLI 调用的默认 Gateway 网关 WebSocket URL。
-- `gateway.remote.transport` 选择 macOS 远程传输（`ssh` 默认，`direct` 用于 ws/wss）。使用 `direct` 时，`gateway.remote.url` 必须为 `ws://` 或 `wss://`。`ws://host` 默认端口 `18789`。
+- `gateway.remote.transport` 选择 macOS 远程传输（`ssh` 默认，`direct` 用于 ws/wss）。使用 `direct` 时，`gateway.remote.url` 必须为 `ws://` 或 `wss://`。`ws://host` 默认端口 `40104`。
 - `gateway.remote.token` 提供远程调用的 token（不需要认证时留空）。
 - `gateway.remote.password` 提供远程调用的密码（不需要认证时留空）。
 
@@ -2962,7 +2962,7 @@ macOS 应用行为：
   gateway: {
     mode: "remote",
     remote: {
-      url: "ws://gateway.tailnet:18789",
+      url: "ws://gateway.tailnet:40104",
       token: "your-token",
       password: "your-password",
     },
@@ -3126,7 +3126,7 @@ Gmail 辅助配置（由 `openclaw webhooks gmail setup` / `run` 使用）：
       topic: "projects/<project-id>/topics/gog-gmail-watch",
       subscription: "gog-gmail-watch-push",
       pushToken: "shared-push-token",
-      hookUrl: "http://127.0.0.1:18789/hooks/gmail",
+      hookUrl: "http://127.0.0.1:40104/hooks/gmail",
       includeBody: true,
       maxBytes: 20000,
       renewEveryMinutes: 720,

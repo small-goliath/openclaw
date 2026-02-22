@@ -10,7 +10,7 @@ title: "Control UI"
 
 The Control UI is a small **Vite + Lit** single-page app served by the Gateway:
 
-- default: `http://<host>:18789/`
+- default: `http://<host>:40104/`
 - optional prefix: set `gateway.controlUi.basePath` (e.g. `/openclaw`)
 
 It speaks **directly to the Gateway WebSocket** on the same port.
@@ -19,7 +19,7 @@ It speaks **directly to the Gateway WebSocket** on the same port.
 
 If the Gateway is running on the same computer, open:
 
-- [http://127.0.0.1:18789/](http://127.0.0.1:18789/) (or [http://localhost:18789/](http://localhost:18789/))
+- [http://127.0.0.1:40104/](http://127.0.0.1:40104/) (or [http://localhost:40104/](http://localhost:40104/))
 
 If the page fails to load, start the Gateway first: `openclaw gateway`.
 
@@ -124,7 +124,7 @@ openclaw gateway --bind tailnet --token "$(openssl rand -hex 32)"
 
 Then open:
 
-- `http://<tailscale-ip>:18789/` (or your configured `gateway.controlUi.basePath`)
+- `http://<tailscale-ip>:40104/` (or your configured `gateway.controlUi.basePath`)
 
 Paste the token into the UI settings (sent as `connect.params.auth.token`).
 
@@ -137,7 +137,7 @@ OpenClaw **blocks** Control UI connections without device identity.
 **Recommended fix:** use HTTPS (Tailscale Serve) or open the UI locally:
 
 - `https://<magicdns>/` (Serve)
-- `http://127.0.0.1:18789/` (on the gateway host)
+- `http://127.0.0.1:40104/` (on the gateway host)
 
 **Downgrade example (token-only over HTTP):**
 
@@ -176,7 +176,7 @@ For local development (separate dev server):
 pnpm ui:dev # auto-installs UI deps on first run
 ```
 
-Then point the UI at your Gateway WS URL (e.g. `ws://127.0.0.1:18789`).
+Then point the UI at your Gateway WS URL (e.g. `ws://127.0.0.1:40104`).
 
 ## Debugging/testing: dev server + remote Gateway
 
@@ -188,13 +188,13 @@ locally but the Gateway runs elsewhere.
 2. Open a URL like:
 
 ```text
-http://localhost:5173/?gatewayUrl=ws://<gateway-host>:18789
+http://localhost:5173/?gatewayUrl=ws://<gateway-host>:40104
 ```
 
 Optional one-time auth (if needed):
 
 ```text
-http://localhost:5173/?gatewayUrl=wss://<gateway-host>:18789&token=<gateway-token>
+http://localhost:5173/?gatewayUrl=wss://<gateway-host>:40104&token=<gateway-token>
 ```
 
 Notes:

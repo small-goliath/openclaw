@@ -25,7 +25,7 @@ System control (launchd/systemd) lives on the Gateway host. See [Gateway](/gatew
 
 Android node app ⇄ (mDNS/NSD + WebSocket) ⇄ **Gateway**
 
-Android connects directly to the Gateway WebSocket (default `ws://<host>:18789`) and uses Gateway-owned pairing.
+Android connects directly to the Gateway WebSocket (default `ws://<host>:40104`) and uses Gateway-owned pairing.
 
 ### Prerequisites
 
@@ -39,12 +39,12 @@ Android connects directly to the Gateway WebSocket (default `ws://<host>:18789`)
 ### 1) Start the Gateway
 
 ```bash
-openclaw gateway --port 18789 --verbose
+openclaw gateway --port 40104 --verbose
 ```
 
 Confirm in logs you see something like:
 
-- `listening on ws://0.0.0.0:18789`
+- `listening on ws://0.0.0.0:40104`
 
 For tailnet-only setups (recommended for Vienna ⇄ London), bind the gateway to the tailnet IP:
 

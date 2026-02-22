@@ -467,7 +467,7 @@ OpenClaw 为 browser、canvas、nodes 和 cron 暴露**一流的智能体工具*
 
 Gateway 网关支持的工具（`canvas`、`nodes`、`cron`）：
 
-- `gatewayUrl`（默认 `ws://127.0.0.1:18789`）
+- `gatewayUrl`（默认 `ws://127.0.0.1:40104`）
 - `gatewayToken`（如果启用了认证）
 - `timeoutMs`
 

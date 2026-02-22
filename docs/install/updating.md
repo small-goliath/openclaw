@@ -164,7 +164,7 @@ CLI (works regardless of OS):
 openclaw gateway status
 openclaw gateway stop
 openclaw gateway restart
-openclaw gateway --port 18789
+openclaw gateway --port 40104
 openclaw logs --follow
 ```
 

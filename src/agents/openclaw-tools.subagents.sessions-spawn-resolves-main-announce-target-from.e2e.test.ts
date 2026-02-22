@@ -18,14 +18,14 @@ vi.mock("../config/config.js", async (importOriginal) => {
   return {
     ...actual,
     loadConfig: () => configOverride,
-    resolveGatewayPort: () => 18789,
+    resolveGatewayPort: () => 40104,
   };
 });
 
 import { emitAgentEvent } from "../infra/agent-events.js";
-import "./test-helpers/fast-core-tools.js";
 import { createOpenClawTools } from "./openclaw-tools.js";
 import { resetSubagentRegistryForTests } from "./subagent-registry.js";
+import "./test-helpers/fast-core-tools.js";
 
 describe("openclaw-tools: subagents", () => {
   beforeEach(() => {

@@ -2,7 +2,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import os from "node:os";
 import { approveDevicePairing, listDevicePairing } from "openclaw/plugin-sdk";
 
-const DEFAULT_GATEWAY_PORT = 18789;
+const DEFAULT_GATEWAY_PORT = 40104;
 
 type DevicePairPluginConfig = {
   publicUrl?: string;

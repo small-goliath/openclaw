@@ -628,7 +628,7 @@ class GatewaySession(
     val tls = endpoint.port == 443 || endpoint.host.contains(".")
 
     // If raw URL is a non-loopback address AND we're behind TLS reverse proxy,
-    // fix the port (gateway sends its internal port like 18789, but we need 443 via Caddy)
+    // fix the port (gateway sends its internal port like 40104, but we need 443 via Caddy)
     if (trimmed.isNotBlank() && !isLoopbackHost(host)) {
       if (tls && port > 0 && port != 443) {
         // Rewrite the URL to use the reverse proxy port instead of the raw gateway port

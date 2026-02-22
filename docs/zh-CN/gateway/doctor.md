@@ -81,7 +81,7 @@ cat ~/.openclaw/openclaw.json
 - 渠道状态警告（从运行中的 Gateway 网关探测）。
 - Supervisor 配置审计（launchd/systemd/schtasks）及可选修复。
 - Gateway 网关运行时最佳实践检查（Node vs Bun，版本管理器路径）。
-- Gateway 网关端口冲突诊断（默认 `18789`）。
+- Gateway 网关端口冲突诊断（默认 `40104`）。
 - 开放私信策略的安全警告。
 - 未设置 `gateway.auth.token` 时的 Gateway 网关认证警告（本地模式；提供 token 生成）。
 - Linux 上的 systemd linger 检查。
@@ -221,7 +221,7 @@ Doctor 检查已安装的 supervisor 配置（launchd/systemd/schtasks）是否�
 
 ### 16）Gateway 网关运行时 + 端口诊断
 
-Doctor 检查服务运行时（PID、上次退出状态），并在服务已安装但实际未运行时发出警告。它还检查 Gateway 网关端口（默认 `18789`）上的端口冲突，并报告可能的原因（Gateway 网关已在运行、SSH 隧道）。
+Doctor 检查服务运行时（PID、上次退出状态），并在服务已安装但实际未运行时发出警告。它还检查 Gateway 网关端口（默认 `40104`）上的端口冲突，并报告可能的原因（Gateway 网关已在运行、SSH 隧道）。
 
 ### 17）Gateway 网关运行时最佳实践
 

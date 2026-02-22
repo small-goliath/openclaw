@@ -40,7 +40,7 @@ function createRequest(params: {
   method?: string;
 }): IncomingMessage {
   const headers: Record<string, string> = {
-    host: "localhost:18789",
+    host: "localhost:40104",
   };
   if (params.authorization) {
     headers.authorization = params.authorization;

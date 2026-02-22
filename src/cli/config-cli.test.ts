@@ -69,7 +69,7 @@ describe("config cli", () => {
             list: [{ id: "main" }, { id: "oracle", workspace: "~/oracle-workspace" }],
           },
           gateway: {
-            port: 18789,
+            port: 40104,
           },
           tools: {
             allow: ["group:fs"],
@@ -101,7 +101,7 @@ describe("config cli", () => {
         expect((finalConfig.agents as Record<string, unknown>).list).toEqual(
           initialConfig.agents.list,
         );
-        expect((finalConfig.gateway as Record<string, unknown>).port).toBe(18789);
+        expect((finalConfig.gateway as Record<string, unknown>).port).toBe(40104);
         expect(finalConfig.tools).toEqual(initialConfig.tools);
         expect(finalConfig.logging).toEqual(initialConfig.logging);
       });
@@ -111,7 +111,7 @@ describe("config cli", () => {
       await withTempHome(async (home) => {
         // Set up a minimal config file
         const initialConfig = {
-          gateway: { port: 18789 },
+          gateway: { port: 40104 },
         };
         await writeConfigFile(home, initialConfig);
 
@@ -137,7 +137,7 @@ describe("config cli", () => {
         expect(finalConfig).not.toHaveProperty("sessions.persistence");
 
         // Original config should still be present
-        expect((finalConfig.gateway as Record<string, unknown>).port).toBe(18789);
+        expect((finalConfig.gateway as Record<string, unknown>).port).toBe(40104);
         // New value should be set
         expect((finalConfig.gateway as Record<string, unknown>).auth).toEqual({ mode: "token" });
       });
@@ -150,7 +150,7 @@ describe("config cli", () => {
         // Set up a config file with multiple existing settings (using valid schema)
         const initialConfig = {
           agents: { list: [{ id: "main" }] },
-          gateway: { port: 18789 },
+          gateway: { port: 40104 },
           tools: {
             profile: "coding",
             alsoAllow: ["agents_list"],

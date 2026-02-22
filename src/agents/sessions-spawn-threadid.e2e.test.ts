@@ -17,16 +17,16 @@ vi.mock("../config/config.js", async (importOriginal) => {
   return {
     ...actual,
     loadConfig: () => configOverride,
-    resolveGatewayPort: () => 18789,
+    resolveGatewayPort: () => 40104,
   };
 });
 
-import "./test-helpers/fast-core-tools.js";
 import { createOpenClawTools } from "./openclaw-tools.js";
 import {
   listSubagentRunsForRequester,
   resetSubagentRegistryForTests,
 } from "./subagent-registry.js";
+import "./test-helpers/fast-core-tools.js";
 
 describe("sessions_spawn requesterOrigin threading", () => {
   beforeEach(() => {

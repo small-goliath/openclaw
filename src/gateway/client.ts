@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { WebSocket, type ClientOptions, type CertMeta } from "ws";
+import { type CertMeta, type ClientOptions, WebSocket } from "ws";
 import type { DeviceIdentity } from "../infra/device-identity.js";
 import {
   clearDeviceAuthToken,
@@ -39,7 +39,7 @@ type Pending = {
 };
 
 export type GatewayClientOptions = {
-  url?: string; // ws://127.0.0.1:18789
+  url?: string; // ws://127.0.0.1:40104
   connectDelayMs?: number;
   tickWatchMinIntervalMs?: number;
   token?: string;
@@ -104,7 +104,7 @@ export class GatewayClient {
     if (this.closed) {
       return;
     }
-    const url = this.opts.url ?? "ws://127.0.0.1:18789";
+    const url = this.opts.url ?? "ws://127.0.0.1:40104";
     if (this.opts.tlsFingerprint && !url.startsWith("wss://")) {
       this.opts.onConnectError?.(new Error("gateway tls fingerprint requires wss:// gateway url"));
       return;

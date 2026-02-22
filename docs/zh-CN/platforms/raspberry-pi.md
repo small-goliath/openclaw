@@ -166,10 +166,10 @@ journalctl -u openclaw -f
 
 ```bash
 # 从你的笔记本电脑/台式机
-ssh -L 18789:localhost:18789 user@gateway-host
+ssh -L 40104:localhost:40104 user@gateway-host
 
 # 然后在浏览器中打开
-open http://localhost:18789
+open http://localhost:40104
 ```
 
 或使用 Tailscale 实现常驻访问：

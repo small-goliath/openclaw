@@ -49,10 +49,10 @@ import { promptGatewayConfig } from "./configure.gateway.js";
 
 describe("promptGatewayConfig", () => {
   it("generates a token when the prompt returns undefined", async () => {
-    mocks.resolveGatewayPort.mockReturnValue(18789);
+    mocks.resolveGatewayPort.mockReturnValue(40104);
     const selectQueue = ["loopback", "token", "off"];
     mocks.select.mockImplementation(async () => selectQueue.shift());
-    const textQueue = ["18789", undefined];
+    const textQueue = ["40104", undefined];
     mocks.text.mockImplementation(async () => textQueue.shift());
     mocks.randomToken.mockReturnValue("generated-token");
     mocks.buildGatewayAuthConfig.mockImplementation(({ mode, token, password }) => ({
@@ -72,12 +72,12 @@ describe("promptGatewayConfig", () => {
   });
   it("does not set password to literal 'undefined' when prompt returns undefined", async () => {
     vi.clearAllMocks();
-    mocks.resolveGatewayPort.mockReturnValue(18789);
+    mocks.resolveGatewayPort.mockReturnValue(40104);
     // Flow: loopback bind → password auth → tailscale off
     const selectQueue = ["loopback", "password", "off"];
     mocks.select.mockImplementation(async () => selectQueue.shift());
     // Port prompt → OK, then password prompt → returns undefined (simulating prompter edge case)
-    const textQueue = ["18789", undefined];
+    const textQueue = ["40104", undefined];
     mocks.text.mockImplementation(async () => textQueue.shift());
     mocks.randomToken.mockReturnValue("unused");
     mocks.buildGatewayAuthConfig.mockImplementation(({ mode, token, password }) => ({

@@ -16,13 +16,13 @@ vi.mock("../config/config.js", async (importOriginal) => {
         agentToAgent: { maxPingPongTurns: 2 },
       },
     }),
-    resolveGatewayPort: () => 18789,
+    resolveGatewayPort: () => 40104,
   };
 });
 
-import "./test-helpers/fast-core-tools.js";
 import { sleep } from "../utils.js";
 import { createOpenClawTools } from "./openclaw-tools.js";
+import "./test-helpers/fast-core-tools.js";
 
 const waitForCalls = async (getCount: () => number, count: number, timeoutMs = 2000) => {
   const start = Date.now();

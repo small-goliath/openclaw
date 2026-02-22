@@ -25,7 +25,7 @@ describe("configureGatewayForOnboarding", () => {
     mocks.randomToken.mockReturnValue("generated-token");
 
     const selectQueue = ["loopback", "token", "off"];
-    const textQueue = ["18789", undefined];
+    const textQueue = ["40104", undefined];
     const prompter: WizardPrompter = {
       intro: vi.fn(async () => {}),
       outro: vi.fn(async () => {}),
@@ -47,10 +47,10 @@ describe("configureGatewayForOnboarding", () => {
       flow: "advanced",
       baseConfig: {},
       nextConfig: {},
-      localPort: 18789,
+      localPort: 40104,
       quickstartGateway: {
         hasExisting: false,
-        port: 18789,
+        port: 40104,
         bind: "loopback",
         authMode: "token",
         tailscaleMode: "off",
@@ -79,7 +79,7 @@ describe("configureGatewayForOnboarding", () => {
     // Flow: loopback bind → password auth → tailscale off
     const selectQueue = ["loopback", "password", "off"];
     // Port prompt → OK, then password prompt → returns undefined
-    const textQueue = ["18789", undefined];
+    const textQueue = ["40104", undefined];
     const prompter: WizardPrompter = {
       intro: vi.fn(async () => {}),
       outro: vi.fn(async () => {}),
@@ -101,10 +101,10 @@ describe("configureGatewayForOnboarding", () => {
       flow: "advanced",
       baseConfig: {},
       nextConfig: {},
-      localPort: 18789,
+      localPort: 40104,
       quickstartGateway: {
         hasExisting: false,
-        port: 18789,
+        port: 40104,
         bind: "loopback",
         authMode: "password",
         tailscaleMode: "off",

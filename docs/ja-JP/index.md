@@ -103,7 +103,7 @@ Gatewayは、セッション、ルーティング、チャネル接続の信頼�
   <Step title="WhatsAppをペアリングしてGatewayを起動">
     ```bash
     openclaw channels login
-    openclaw gateway --port 18789
+    openclaw gateway --port 40104
     ```
   </Step>
 </Steps>
@@ -114,7 +114,7 @@ Gatewayは、セッション、ルーティング、チャネル接続の信頼�
 
 Gatewayの起動後、ブラウザでControl UIを開きます。
 
-- ローカルデフォルト: [http://127.0.0.1:18789/](http://127.0.0.1:18789/)
+- ローカルデフォルト: [http://127.0.0.1:40104/](http://127.0.0.1:40104/)
 - リモートアクセス: [Webサーフェス](/web)および[Tailscale](/gateway/tailscale)
 
 <p align="center">
