@@ -2,14 +2,20 @@
  * 불변 감사 로그 저장소 구현
  * WORM(Write Once Read Many) 보호 및 암호화 무결성 검증
  * 체인 해싱을 통한 변조 방지
+ * HMAC-SHA256 디지털 서명 지원 (FR-012)
  */
 
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { KeyManager } from "./encryption.js";
 
 const log = createSubsystemLogger("security/immutable-audit");
+
+// Keychain constants for audit log signing
+const AUDIT_SIGNING_KEYCHAIN_SERVICE = "openclaw-audit-signing";
+const AUDIT_SIGNING_KEYCHAIN_ACCOUNT = "signing-key";
 
 /**
  * 감사 로그 엔트리
@@ -28,6 +34,31 @@ export interface AuditLogEntry {
   sessionId?: string;
   previousHash: string; // 이전 엔트리의 해시
   hash: string; // 현재 엔트리의 해시
+}
+
+/**
+ * 서명된 감사 로그 엔트리 (FR-012)
+ * HMAC-SHA256 디지털 서명이 추가된 엔트리
+ */
+export interface SignedAuditLogEntry extends AuditLogEntry {
+  /** HMAC-SHA256 signature */
+  signature: string;
+  /** Signature algorithm */
+  signatureAlgorithm: "HMAC-SHA256";
+}
+
+/**
+ * 서명 검증 결과
+ */
+export interface SignatureVerificationResult {
+  /** Whether all signatures are valid */
+  valid: boolean;
+  /** List of invalid entry sequences */
+  invalidEntries: number[];
+  /** Total entries checked */
+  totalEntries: number;
+  /** Error message if verification failed */
+  error?: string;
 }
 
 /**
@@ -93,6 +124,26 @@ function calculateEntryHash(entry: Omit<AuditLogEntry, "hash">): string {
  */
 function getGenesisHash(): string {
   return crypto.createHash("sha256").update("OPENCLAW_AUDIT_LOG_GENESIS").digest("hex");
+}
+
+/**
+ * 서명 데이터 구성
+ * 엔트리의 핵심 필드를 JSON으로 직렬화하여 서명
+ */
+function getSignableData(entry: AuditLogEntry): string {
+  return JSON.stringify({
+    timestamp: entry.timestamp,
+    sequence: entry.sequence,
+    eventType: entry.eventType,
+    hash: entry.hash,
+  });
+}
+
+/**
+ * HMAC-SHA256 서명 생성
+ */
+function createHmacSignature(data: string, key: Buffer): string {
+  return crypto.createHmac("sha256", key).update(data).digest("hex");
 }
 
 /**
@@ -381,8 +432,358 @@ export class ImmutableAuditStore {
   }
 }
 
+/**
+ * 서명된 감사 로그 저장소 클래스 (FR-012)
+ * HMAC-SHA256 디지털 서명을 추가하여 로그 무결성 검증 강화
+ */
+export class SignedAuditStore extends ImmutableAuditStore {
+  private signingKey: Buffer | null = null;
+  private keyManager: KeyManager;
+  private signingInitialized = false;
+
+  constructor(config: Partial<ImmutableAuditStoreConfig> = {}) {
+    super(config);
+    this.keyManager = new KeyManager({
+      provider: "local",
+      enabled: true,
+      allowFileFallback: false,
+      failSecure: true,
+    });
+  }
+
+  /**
+   * 서명 키 초기화
+   * OS 키체인에서 키를 가져오거나 새로 생성
+   */
+  private async initializeSigningKey(): Promise<void> {
+    if (this.signingInitialized) {
+      return;
+    }
+
+    // KeyManager를 통해 키 가져오기 (별도의 서비스/계정 사용)
+    const key = await this.getOrCreateSigningKey();
+
+    if (!key) {
+      throw new Error(
+        "Failed to initialize audit log signing key. " + "Please ensure OS keychain is available.",
+      );
+    }
+
+    this.signingKey = key;
+    this.signingInitialized = true;
+
+    log.info("Audit log signing key initialized");
+  }
+
+  /**
+   * 서명 키 가져오기 또는 생성
+   */
+  private async getOrCreateSigningKey(): Promise<Buffer | null> {
+    // KeyManager 낸부 키체인 접근을 사용
+    const { spawnSync } = await import("node:child_process");
+
+    // 먼저 기존 키 확인
+    const existingKey = this.retrieveSigningKeyFromKeychain(spawnSync);
+    if (existingKey) {
+      try {
+        return Buffer.from(existingKey, "base64");
+      } catch (err) {
+        log.warn("Failed to decode existing signing key, generating new one", { err });
+      }
+    }
+
+    // 새 키 생성 (32 bytes for HMAC-SHA256)
+    const newKey = crypto.randomBytes(32);
+    const keyBase64 = newKey.toString("base64");
+
+    // 키체인에 저장
+    const stored = this.storeSigningKeyToKeychain(spawnSync, keyBase64);
+    if (!stored) {
+      log.error("Failed to store audit signing key in OS keychain");
+      return null;
+    }
+
+    log.info("Generated new audit log signing key");
+    return newKey;
+  }
+
+  /**
+   * 키체인에서 서명 키 가져오기
+   */
+  private retrieveSigningKeyFromKeychain(
+    spawnSync: typeof import("node:child_process").spawnSync,
+  ): string | null {
+    try {
+      const platform = process.platform;
+
+      if (platform === "darwin") {
+        const result = spawnSync(
+          "security",
+          [
+            "find-generic-password",
+            "-s",
+            AUDIT_SIGNING_KEYCHAIN_SERVICE,
+            "-a",
+            AUDIT_SIGNING_KEYCHAIN_ACCOUNT,
+            "-w",
+          ],
+          { encoding: "utf-8" },
+        );
+        if (result.status === 0) {
+          return result.stdout.trim();
+        }
+      } else if (platform === "linux") {
+        const result = spawnSync(
+          "secret-tool",
+          [
+            "lookup",
+            "service",
+            AUDIT_SIGNING_KEYCHAIN_SERVICE,
+            "account",
+            AUDIT_SIGNING_KEYCHAIN_ACCOUNT,
+          ],
+          { encoding: "utf-8" },
+        );
+        if (result.status === 0) {
+          return result.stdout.trim();
+        }
+      } else if (platform === "win32") {
+        const target = `${AUDIT_SIGNING_KEYCHAIN_SERVICE}:${AUDIT_SIGNING_KEYCHAIN_ACCOUNT}`;
+        const psScript = `
+          $cred = Get-StoredCredential -Target "${target}"
+          if ($cred) { $cred.GetNetworkCredential().Password }
+        `;
+        const result = spawnSync("powershell.exe", ["-Command", psScript], { encoding: "utf-8" });
+        if (result.status === 0 && result.stdout.trim()) {
+          return result.stdout.trim();
+        }
+      }
+    } catch (err) {
+      log.warn("Failed to retrieve signing key from keychain", { err });
+    }
+    return null;
+  }
+
+  /**
+   * 키체인에 서명 키 저장
+   */
+  private storeSigningKeyToKeychain(
+    spawnSync: typeof import("node:child_process").spawnSync,
+    keyBase64: string,
+  ): boolean {
+    try {
+      const platform = process.platform;
+
+      if (platform === "darwin") {
+        const result = spawnSync(
+          "security",
+          [
+            "add-generic-password",
+            "-s",
+            AUDIT_SIGNING_KEYCHAIN_SERVICE,
+            "-a",
+            AUDIT_SIGNING_KEYCHAIN_ACCOUNT,
+            "-w",
+            keyBase64,
+            "-U",
+          ],
+          { encoding: "utf-8" },
+        );
+        return result.status === 0;
+      } else if (platform === "linux") {
+        const result = spawnSync(
+          "secret-tool",
+          [
+            "store",
+            "--label",
+            "OpenClaw Audit Signing Key",
+            "service",
+            AUDIT_SIGNING_KEYCHAIN_SERVICE,
+            "account",
+            AUDIT_SIGNING_KEYCHAIN_ACCOUNT,
+          ],
+          { input: keyBase64, encoding: "utf-8" },
+        );
+        return result.status === 0;
+      } else if (platform === "win32") {
+        const target = `${AUDIT_SIGNING_KEYCHAIN_SERVICE}:${AUDIT_SIGNING_KEYCHAIN_ACCOUNT}`;
+        const psScript = `
+          $secure = ConvertTo-SecureString "${keyBase64.replace(/"/g, '`"')}" -AsPlainText -Force
+          New-StoredCredential -Target "${target}" -SecurePassword $secure -Type Generic -Persist LocalMachine
+        `;
+        const result = spawnSync("powershell.exe", ["-Command", psScript], { encoding: "utf-8" });
+        return result.status === 0;
+      }
+    } catch (err) {
+      log.warn("Failed to store signing key to keychain", { err });
+    }
+    return false;
+  }
+
+  /**
+   * 서명된 감사 로그 엔트리 추가
+   */
+  async appendWithSignature(
+    entry: Omit<AuditLogEntry, "sequence" | "previousHash" | "hash">,
+  ): Promise<SignedAuditLogEntry> {
+    if (!this.signingInitialized) {
+      await this.initializeSigningKey();
+    }
+
+    if (!this.signingKey) {
+      throw new Error("Signing key not available");
+    }
+
+    // 부모 클래스의 append 메서드로 기본 엔트리 생성
+    const baseEntry = await this.append(entry);
+
+    // 서명 생성
+    const signature = this.signEntry(baseEntry);
+
+    const signedEntry: SignedAuditLogEntry = {
+      ...baseEntry,
+      signature,
+      signatureAlgorithm: "HMAC-SHA256",
+    };
+
+    // 서명된 엔트리로 파일 업데이트 (기존 엔트리 대체)
+    await this.updateLastEntryWithSignature(signedEntry);
+
+    log.debug("Signed audit log entry created", {
+      sequence: signedEntry.sequence,
+      signature: signature.substring(0, 16) + "...",
+    });
+
+    return signedEntry;
+  }
+
+  /**
+   * 엔트리 서명 생성
+   */
+  private signEntry(entry: AuditLogEntry): string {
+    if (!this.signingKey) {
+      throw new Error("Signing key not available");
+    }
+
+    const data = getSignableData(entry);
+    return createHmacSignature(data, this.signingKey);
+  }
+
+  /**
+   * 마지막 엔트리를 서명된 버전으로 업데이트
+   */
+  private async updateLastEntryWithSignature(signedEntry: SignedAuditLogEntry): Promise<void> {
+    // 현재 파일의 모든 엔트리 읽기
+    try {
+      const content = await fs.readFile(this.currentFilePath, "utf-8");
+      const lines = content.trim().split("\n");
+
+      // 마지막 엔트리를 서명된 버전으로 교체
+      lines[lines.length - 1] = JSON.stringify(signedEntry);
+
+      // 파일 다시 쓰기
+      await fs.writeFile(this.currentFilePath, lines.join("\n") + "\n", { mode: 0o600 });
+    } catch (error) {
+      log.error("Failed to update entry with signature", { error });
+      throw error;
+    }
+  }
+
+  /**
+   * 서명 검증
+   */
+  verifySignature(entry: SignedAuditLogEntry): boolean {
+    if (!this.signingKey) {
+      throw new Error("Signing key not available. Call initializeSigningKey() first.");
+    }
+
+    // signatureAlgorithm 확인
+    if (entry.signatureAlgorithm !== "HMAC-SHA256") {
+      log.warn("Unsupported signature algorithm", { algorithm: entry.signatureAlgorithm });
+      return false;
+    }
+
+    const expectedSignature = this.signEntry(entry);
+    const isValid = entry.signature === expectedSignature;
+
+    if (!isValid) {
+      log.error("Signature verification failed", {
+        sequence: entry.sequence,
+        expected: expectedSignature.substring(0, 16) + "...",
+        received: entry.signature.substring(0, 16) + "...",
+      });
+    }
+
+    return isValid;
+  }
+
+  /**
+   * 모든 서명 검증
+   */
+  async verifyAllSignatures(): Promise<SignatureVerificationResult> {
+    if (!this.signingInitialized) {
+      await this.initializeSigningKey();
+    }
+
+    if (!this.signingKey) {
+      return {
+        valid: false,
+        invalidEntries: [],
+        totalEntries: 0,
+        error: "Signing key not available",
+      };
+    }
+
+    const entries = await this.getAllEntries();
+    const invalidEntries: number[] = [];
+
+    for (const entry of entries) {
+      // SignedAuditLogEntry인지 확인
+      const signedEntry = entry as SignedAuditLogEntry;
+      if (!signedEntry.signature || !signedEntry.signatureAlgorithm) {
+        // 서명이 없는 엔트리는 스킵 (이전 버전 호환)
+        continue;
+      }
+
+      if (!this.verifySignature(signedEntry)) {
+        invalidEntries.push(entry.sequence);
+      }
+    }
+
+    const result: SignatureVerificationResult = {
+      valid: invalidEntries.length === 0,
+      invalidEntries,
+      totalEntries: entries.length,
+    };
+
+    if (!result.valid) {
+      log.error("Signature verification failed for some entries", {
+        invalidCount: invalidEntries.length,
+        invalidSequences: invalidEntries,
+      });
+    } else {
+      log.info("All signatures verified successfully", { totalEntries: entries.length });
+    }
+
+    return result;
+  }
+
+  /**
+   * 서명된 엔트리 조회 (서명 검증 포함)
+   */
+  async getSignedEntries(
+    options: Parameters<ImmutableAuditStore["getEntries"]>[0] = {},
+  ): Promise<SignedAuditLogEntry[]> {
+    const entries = await this.getEntries(options);
+    return entries.filter(
+      (e): e is SignedAuditLogEntry => "signature" in e && "signatureAlgorithm" in e,
+    );
+  }
+}
+
 // 싱글톤 인스턴스
 let globalAuditStore: ImmutableAuditStore | null = null;
+let globalSignedAuditStore: SignedAuditStore | null = null;
 
 /**
  * 전역 감사 로그 저장소 가져오기
@@ -395,6 +796,16 @@ export function getGlobalAuditStore(): ImmutableAuditStore {
 }
 
 /**
+ * 전역 서명된 감사 로그 저장소 가져오기 (FR-012)
+ */
+export function getGlobalSignedAuditStore(): SignedAuditStore {
+  if (!globalSignedAuditStore) {
+    globalSignedAuditStore = new SignedAuditStore();
+  }
+  return globalSignedAuditStore;
+}
+
+/**
  * 감사 로그 엔트리 추가 헬퍼 함수
  */
 export async function logAuditEvent(
@@ -402,6 +813,19 @@ export async function logAuditEvent(
 ): Promise<AuditLogEntry> {
   const store = getGlobalAuditStore();
   return store.append({
+    ...event,
+    timestamp: Date.now(),
+  });
+}
+
+/**
+ * 서명된 감사 로그 엔트리 추가 헬퍼 함수 (FR-012)
+ */
+export async function logSignedAuditEvent(
+  event: Omit<AuditLogEntry, "sequence" | "previousHash" | "hash" | "timestamp">,
+): Promise<SignedAuditLogEntry> {
+  const store = getGlobalSignedAuditStore();
+  return store.appendWithSignature({
     ...event,
     timestamp: Date.now(),
   });

@@ -13,6 +13,15 @@ export type GatewayTlsConfig = {
   caPath?: string;
 };
 
+export type GatewayHstsConfig = {
+  /** HSTS max-age in seconds (default: 31536000 = 1 year). */
+  maxAge?: number;
+  /** Include includeSubDomains directive (default: true). */
+  includeSubDomains?: boolean;
+  /** Include preload directive for HSTS preload list (default: false). */
+  preload?: boolean;
+};
+
 export type WideAreaDiscoveryConfig = {
   enabled?: boolean;
   /** Optional unicast DNS-SD domain (e.g. "openclaw.internal"). */
@@ -272,6 +281,8 @@ export type GatewayConfig = {
   remote?: GatewayRemoteConfig;
   reload?: GatewayReloadConfig;
   tls?: GatewayTlsConfig;
+  /** HSTS (HTTP Strict Transport Security) configuration. */
+  hsts?: GatewayHstsConfig;
   http?: GatewayHttpConfig;
   nodes?: GatewayNodesConfig;
   /**

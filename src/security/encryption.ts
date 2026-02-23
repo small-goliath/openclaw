@@ -925,6 +925,492 @@ export class KeyManager {
 }
 
 // ============================================================================
+// Key Rotation Manager
+// ============================================================================
+
+export interface RotationResult {
+  success: boolean;
+  oldVersion?: string;
+  newVersion?: string;
+  rotatedAt?: number;
+  error?: string;
+}
+
+export interface DataMigrationItem {
+  id: string;
+  encryptedData: EncryptedData;
+  decrypt: (data: EncryptedData) => Promise<string>;
+  encrypt: (plaintext: string) => Promise<EncryptedData>;
+  update: (id: string, newData: EncryptedData) => Promise<void>;
+}
+
+export class KeyRotationManager {
+  private rotationTimer: NodeJS.Timeout | null = null;
+  private keyManager: KeyManager;
+  private config: EncryptionConfig;
+  private isRotating: boolean = false;
+  private readonly ROTATION_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+  constructor(keyManager: KeyManager, config: EncryptionConfig) {
+    this.keyManager = keyManager;
+    this.config = config;
+  }
+
+  /**
+   * Start automatic key rotation scheduler
+   * Checks every day if rotation is needed based on rotationDays configuration
+   */
+  startAutoRotation(): void {
+    if (this.rotationTimer) {
+      log.warn("Key rotation scheduler already running");
+      return;
+    }
+
+    if (!this.config.enabled) {
+      log.info("Encryption is disabled, key rotation scheduler not started");
+      return;
+    }
+
+    log.info("Starting automatic key rotation scheduler", {
+      checkIntervalHours: 24,
+      rotationDays: this.config.keyRotationDays || DEFAULT_ROTATION_DAYS,
+    });
+
+    // Log security event for scheduler start
+    logSecurityEvent({
+      id: crypto.randomUUID(),
+      eventType: "CONFIG_CHANGE",
+      severity: "info",
+      timestamp: new Date().toISOString(),
+      correlationId: crypto.randomUUID(),
+      source: {
+        component: "encryption",
+        host: "localhost",
+        version: "1.0.0",
+      },
+      details: {
+        changeType: "update",
+        configPath: `key-rotation-scheduler?rotationDays=${this.config.keyRotationDays || DEFAULT_ROTATION_DAYS}`,
+        changedBy: "system",
+      },
+    }).catch(() => {});
+
+    // Check immediately on start
+    this.checkAndRotateIfNeeded().catch((err) => {
+      log.error("Initial rotation check failed", { err });
+    });
+
+    // Schedule periodic checks
+    this.rotationTimer = setInterval(() => {
+      this.checkAndRotateIfNeeded().catch((err) => {
+        log.error("Scheduled rotation check failed", { err });
+      });
+    }, this.ROTATION_CHECK_INTERVAL_MS);
+  }
+
+  /**
+   * Stop automatic key rotation scheduler
+   */
+  stopAutoRotation(): void {
+    if (this.rotationTimer) {
+      clearInterval(this.rotationTimer);
+      this.rotationTimer = null;
+      log.info("Key rotation scheduler stopped");
+
+      // Log security event for scheduler stop
+      logSecurityEvent({
+        id: crypto.randomUUID(),
+        eventType: "CONFIG_CHANGE",
+        severity: "info",
+        timestamp: new Date().toISOString(),
+        correlationId: crypto.randomUUID(),
+        source: {
+          component: "encryption",
+          host: "localhost",
+          version: "1.0.0",
+        },
+        details: {
+          changeType: "delete",
+          configPath: "key-rotation-scheduler",
+          changedBy: "system",
+        },
+      }).catch(() => {});
+    }
+  }
+
+  /**
+   * Check if rotation is needed and perform rotation if necessary
+   */
+  private async checkAndRotateIfNeeded(): Promise<void> {
+    const metadata = this.keyManager.getKeyMetadata();
+
+    if (!this.keyManager.isRotationNeeded(metadata ?? undefined)) {
+      log.debug("Key rotation not needed yet", {
+        nextRotation: metadata
+          ? new Date(metadata.createdAt + metadata.rotationDays * 24 * 60 * 60 * 1000).toISOString()
+          : "unknown",
+      });
+      return;
+    }
+
+    log.info("Key rotation is needed, initiating rotation");
+    await this.rotateKey();
+  }
+
+  /**
+   * Check if a rotation is currently in progress
+   */
+  isRotationInProgress(): boolean {
+    return this.isRotating;
+  }
+
+  /**
+   * Perform key rotation
+   * This is a placeholder implementation that generates a new key.
+   * In a full implementation, this would:
+   * 1. Generate new key
+   * 2. Decrypt all existing encrypted data with old key
+   * 3. Re-encrypt with new key
+   * 4. Store new key and metadata
+   * 5. Log rotation event
+   *
+   * Note: Data migration requires integration with the specific storage layer
+   * (database, config files, etc.) that holds the encrypted data.
+   */
+  async rotateKey(): Promise<RotationResult> {
+    if (this.isRotating) {
+      return {
+        success: false,
+        error: "Rotation already in progress",
+      };
+    }
+
+    if (!this.config.enabled) {
+      return {
+        success: false,
+        error: "Encryption is disabled",
+      };
+    }
+
+    this.isRotating = true;
+    const startTime = Date.now();
+
+    try {
+      // Get current metadata before rotation
+      const oldMetadata = this.keyManager.getKeyMetadata();
+      const oldVersion = oldMetadata?.version || "unknown";
+
+      log.info("Starting key rotation", {
+        oldVersion,
+        provider: this.config.provider,
+      });
+
+      // Clear key cache to force key regeneration
+      this.keyManager.clearCache();
+
+      // Generate new key by clearing and re-initializing
+      // For local provider: delete old key from keychain to force new key generation
+      // For KMS providers: generate new data key
+      const newKey = await this.generateNewKey();
+
+      if (!newKey) {
+        throw new Error("Failed to generate new encryption key");
+      }
+
+      // Create new metadata
+      const newMetadata: KeyMetadata = {
+        version: this.generateNewVersion(oldVersion),
+        createdAt: Date.now(),
+        rotationDays: this.config.keyRotationDays || DEFAULT_ROTATION_DAYS,
+        provider: this.config.provider,
+      };
+
+      // Store new metadata
+      await this.storeNewMetadata(newMetadata);
+
+      // Log successful rotation
+      const duration = Date.now() - startTime;
+      log.info("Key rotation completed successfully", {
+        oldVersion,
+        newVersion: newMetadata.version,
+        durationMs: duration,
+      });
+
+      // Log security event
+      await logSecurityEvent({
+        id: crypto.randomUUID(),
+        eventType: "CONFIG_CHANGE",
+        severity: "info",
+        timestamp: new Date().toISOString(),
+        correlationId: crypto.randomUUID(),
+        source: {
+          component: "encryption",
+          host: "localhost",
+          version: "1.0.0",
+        },
+        details: {
+          changeType: "update",
+          configPath: `encryption-key?action=rotate&oldVersion=${oldVersion}&newVersion=${newMetadata.version}&durationMs=${duration}`,
+          changedBy: "system",
+        },
+      });
+
+      // Clear cache again to ensure new key is used
+      this.keyManager.clearCache();
+
+      return {
+        success: true,
+        oldVersion,
+        newVersion: newMetadata.version,
+        rotatedAt: Date.now(),
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      log.error("Key rotation failed", { error: errorMessage });
+
+      // Log critical security event
+      await alertCriticalEvent({
+        id: crypto.randomUUID(),
+        eventType: "SUSPICIOUS_ACTIVITY",
+        severity: "critical",
+        timestamp: new Date().toISOString(),
+        correlationId: crypto.randomUUID(),
+        source: {
+          component: "encryption",
+          host: "localhost",
+          version: "1.0.0",
+        },
+        details: {
+          activityType: "unusual_api_usage",
+          description: `Key rotation failed: ${errorMessage}`,
+          riskScore: 70,
+          indicators: ["key_rotation_failure"],
+        },
+      });
+
+      return {
+        success: false,
+        error: errorMessage,
+      };
+    } finally {
+      this.isRotating = false;
+    }
+  }
+
+  /**
+   * Generate a new encryption key
+   * Implementation varies by provider
+   */
+  private async generateNewKey(): Promise<Buffer | null> {
+    switch (this.config.provider) {
+      case "local":
+        return this.generateNewLocalKey();
+      case "aws-kms":
+        return this.generateNewAwsKmsKey();
+      case "azure-keyvault":
+        return this.generateNewAzureKeyVaultKey();
+      default:
+        log.error("Unknown provider for key generation", { provider: this.config.provider });
+        return null;
+    }
+  }
+
+  /**
+   * Generate new local key by deleting old key and creating new one
+   */
+  private async generateNewLocalKey(): Promise<Buffer | null> {
+    const keychain = new KeychainManager();
+
+    // Delete old key from keychain
+    const deleted = keychain.deleteSecret(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
+    if (deleted) {
+      log.info("Deleted old key from keychain");
+    }
+
+    // Generate new random key
+    const newKey = generateRandomBytes(KEY_LENGTH);
+    const keyBase64 = base64Encode(newKey);
+
+    // Store new key in keychain
+    const stored = keychain.storeSecret(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, keyBase64);
+
+    if (!stored) {
+      // Try file fallback if keychain fails
+      if (this.config.allowFileFallback) {
+        return await this.storeKeyToFile(newKey, keyBase64);
+      }
+      return null;
+    }
+
+    return newKey;
+  }
+
+  /**
+   * Store key to file as fallback
+   */
+  private async storeKeyToFile(newKey: Buffer, keyBase64: string): Promise<Buffer | null> {
+    const keyPath = this.config.localKeyPath || path.join(resolveStateDir(), ".encryption-key");
+
+    try {
+      await fs.promises.mkdir(path.dirname(keyPath), { recursive: true, mode: 0o700 });
+      await fs.promises.writeFile(keyPath, keyBase64, { mode: 0o600 });
+
+      // Update checksum
+      const checksum = crypto.createHash("sha256").update(keyBase64).digest("hex");
+      await fs.promises.writeFile(`${keyPath}.checksum`, checksum, { mode: 0o600 });
+
+      log.warn("New key stored to file (fallback mode)", { keyPath });
+      return newKey;
+    } catch (err) {
+      log.error("Failed to store new key to file", { err });
+      return null;
+    }
+  }
+
+  /**
+   * Generate new AWS KMS data key
+   */
+  private async generateNewAwsKmsKey(): Promise<Buffer | null> {
+    try {
+      const { KMSClient, GenerateDataKeyCommand } = await import("@aws-sdk/client-kms");
+
+      const keyId = this.config.keyId || process.env.AWS_KMS_KEY_ID;
+      if (!keyId) {
+        throw new Error("AWS KMS Key ID not configured");
+      }
+
+      const region = process.env.AWS_REGION || "us-east-1";
+      const client = new KMSClient({ region });
+
+      const command = new GenerateDataKeyCommand({
+        KeyId: keyId,
+        KeySpec: "AES_256",
+      });
+
+      const response = (await client.send(command)) as {
+        Plaintext?: Uint8Array;
+        CiphertextBlob?: Uint8Array;
+      };
+
+      const responsePlaintext = response.Plaintext;
+      const responseCiphertextBlob = response.CiphertextBlob;
+
+      if (
+        !(responsePlaintext instanceof Uint8Array) ||
+        !(responseCiphertextBlob instanceof Uint8Array)
+      ) {
+        throw new Error("KMS GenerateDataKey returned empty response");
+      }
+
+      // Store encrypted key
+      const encryptedKeyPath = path.join(resolveStateDir(), ".aws-kms-encrypted-key");
+      const encryptedKey = Buffer.from(responseCiphertextBlob).toString("base64");
+      await fs.promises.mkdir(path.dirname(encryptedKeyPath), { recursive: true, mode: 0o700 });
+      await fs.promises.writeFile(encryptedKeyPath, encryptedKey, { mode: 0o600 });
+
+      log.info("Generated new AWS KMS data key", { keyId });
+      return Buffer.from(responsePlaintext);
+    } catch (err) {
+      log.error("Failed to generate new AWS KMS key", { err });
+      return null;
+    }
+  }
+
+  /**
+   * Generate new Azure Key Vault wrapped key
+   */
+  private async generateNewAzureKeyVaultKey(): Promise<Buffer | null> {
+    try {
+      const { KeyClient, CryptographyClient } = await import("@azure/keyvault-keys");
+      const { DefaultAzureCredential } = await import("@azure/identity");
+
+      const vaultUrl = process.env.AZURE_KEY_VAULT_URL;
+      const keyName = this.config.keyId || process.env.AZURE_KEY_NAME;
+
+      if (!vaultUrl || !keyName) {
+        throw new Error("Azure Key Vault configuration missing");
+      }
+
+      const credential = new DefaultAzureCredential();
+      const keyClient = new KeyClient(vaultUrl, credential);
+
+      // Generate new data key locally
+      const dataKey = generateRandomBytes(KEY_LENGTH);
+
+      // Get or create key
+      let key;
+      try {
+        key = await keyClient.getKey(keyName);
+      } catch {
+        key = await keyClient.createRsaKey(keyName, { keySize: 4096 });
+      }
+
+      const cryptoClient = new CryptographyClient(key, credential);
+      const wrapResult = await cryptoClient.wrapKey("RSA-OAEP", dataKey);
+
+      // Store wrapped key
+      const wrappedKeyPath = path.join(resolveStateDir(), ".azure-keyvault-wrapped-key");
+      const wrappedKey = Buffer.from(wrapResult.result).toString("base64");
+      await fs.promises.mkdir(path.dirname(wrappedKeyPath), { recursive: true, mode: 0o700 });
+      await fs.promises.writeFile(wrappedKeyPath, wrappedKey, { mode: 0o600 });
+
+      log.info("Generated and wrapped new Azure Key Vault data key", { keyName });
+      return dataKey;
+    } catch (err) {
+      log.error("Failed to generate new Azure Key Vault key", { err });
+      return null;
+    }
+  }
+
+  /**
+   * Generate new version string based on old version
+   */
+  private generateNewVersion(oldVersion: string): string {
+    // Parse version number (e.g., "v1" -> 1)
+    const match = oldVersion.match(/v(\d+)/);
+    const versionNum = match ? parseInt(match[1], 10) : 0;
+    return `v${versionNum + 1}`;
+  }
+
+  /**
+   * Store new key metadata
+   */
+  private async storeNewMetadata(metadata: KeyMetadata): Promise<boolean> {
+    const keychain = new KeychainManager();
+    return keychain.storeSecret(
+      KEYCHAIN_SERVICE,
+      KEYCHAIN_VERSION_ACCOUNT,
+      JSON.stringify(metadata),
+    );
+  }
+
+  /**
+   * Get next scheduled rotation time
+   */
+  getNextRotationTime(): Date | null {
+    const metadata = this.keyManager.getKeyMetadata();
+    if (!metadata) {
+      return null;
+    }
+
+    const rotationDays = metadata.rotationDays || DEFAULT_ROTATION_DAYS;
+    const rotationMs = rotationDays * 24 * 60 * 60 * 1000;
+    return new Date(metadata.createdAt + rotationMs);
+  }
+
+  /**
+   * Get time until next rotation in milliseconds
+   */
+  getTimeUntilRotation(): number | null {
+    const nextRotation = this.getNextRotationTime();
+    if (!nextRotation) {
+      return null;
+    }
+    return Math.max(0, nextRotation.getTime() - Date.now());
+  }
+}
+
+// ============================================================================
 // Encryption Service
 // ============================================================================
 
@@ -933,10 +1419,12 @@ export class EncryptionService {
   private config: EncryptionConfig;
   private workerPool: CryptoWorkerPool | null = null;
   private useWorkers: boolean;
+  private keyRotationManager: KeyRotationManager;
 
   constructor(config: EncryptionConfig, useWorkers: boolean = true) {
     this.config = config;
     this.keyManager = new KeyManager(config);
+    this.keyRotationManager = new KeyRotationManager(this.keyManager, config);
     this.useWorkers = useWorkers && process.env.OPENCLAW_CRYPTO_WORKERS !== "disabled";
 
     // Worker Pool 초기화 (지연 로딩)
@@ -950,6 +1438,55 @@ export class EncryptionService {
         this.useWorkers = false;
       }
     }
+  }
+
+  /**
+   * Get the key rotation manager instance
+   */
+  getKeyRotationManager(): KeyRotationManager {
+    return this.keyRotationManager;
+  }
+
+  /**
+   * Start automatic key rotation
+   */
+  startKeyRotation(): void {
+    this.keyRotationManager.startAutoRotation();
+  }
+
+  /**
+   * Stop automatic key rotation
+   */
+  stopKeyRotation(): void {
+    this.keyRotationManager.stopAutoRotation();
+  }
+
+  /**
+   * Manually trigger key rotation
+   */
+  async rotateKey(): Promise<RotationResult> {
+    return this.keyRotationManager.rotateKey();
+  }
+
+  /**
+   * Check if key rotation is in progress
+   */
+  isKeyRotationInProgress(): boolean {
+    return this.keyRotationManager.isRotationInProgress();
+  }
+
+  /**
+   * Get next scheduled rotation time
+   */
+  getNextKeyRotationTime(): Date | null {
+    return this.keyRotationManager.getNextRotationTime();
+  }
+
+  /**
+   * Get time until next rotation in milliseconds
+   */
+  getTimeUntilKeyRotation(): number | null {
+    return this.keyRotationManager.getTimeUntilRotation();
   }
 
   /**
@@ -1217,7 +1754,8 @@ export function getOrInitEncryption(config?: EncryptionConfig): EncryptionServic
 
   const defaultConfig: EncryptionConfig = config || {
     provider: "local",
-    enabled: false,
+    enabled: true,
+    keyRotationDays: 90,
   };
 
   return initEncryption(defaultConfig);

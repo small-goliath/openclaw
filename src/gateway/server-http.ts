@@ -491,13 +491,19 @@ export function createGatewayHttpServer(opts: {
       return;
     }
 
+    // Load config early to access security settings
+    const configSnapshot = loadConfig();
+
     // Apply security headers to all HTTP responses (SEC-005)
     // This includes X-Content-Type-Options, X-Frame-Options, X-XSS-Protection,
     // Content-Security-Policy, Referrer-Policy, and Permissions-Policy
-    applySecurityHeaders(res, { secure: opts.tlsOptions !== undefined });
+    const hstsConfig = configSnapshot.gateway?.hsts;
+    applySecurityHeaders(res, {
+      secure: opts.tlsOptions !== undefined,
+      hsts: hstsConfig,
+    });
 
     try {
-      const configSnapshot = loadConfig();
       const trustedProxies = configSnapshot.gateway?.trustedProxies ?? [];
       const requestPath = new URL(req.url ?? "/", "http://localhost").pathname;
 
