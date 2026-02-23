@@ -8,11 +8,11 @@
  */
 
 import type { Command } from "commander";
-import { getGlobalMemoryProfiler, isDevelopmentMode } from "../utils/memory-profiler.js";
-import { defaultRuntime } from "../runtime.js";
-import { colorize, isRich, theme } from "../terminal/theme.js";
-import { formatDocsLink } from "../terminal/links.js";
 import { setVerbose } from "../globals.js";
+import { defaultRuntime } from "../runtime.js";
+import { formatDocsLink } from "../terminal/links.js";
+import { colorize, isRich, theme } from "../terminal/theme.js";
+import { getGlobalMemoryProfiler, isDevelopmentMode } from "../utils/memory-profiler.js";
 
 type DevHeapOptions = {
   json?: boolean;
@@ -41,11 +41,17 @@ export async function runDevHeapStatus(opts: DevHeapOptions): Promise<void> {
   const stats = profiler.getStats();
 
   if (opts.json) {
-    defaultRuntime.log(JSON.stringify({
-      ...stats,
-      isProfiling: profiler.isProfiling(),
-      isDevelopmentMode: isDevelopmentMode(),
-    }, null, 2));
+    defaultRuntime.log(
+      JSON.stringify(
+        {
+          ...stats,
+          isProfiling: profiler.isProfiling(),
+          isDevelopmentMode: isDevelopmentMode(),
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
 
@@ -89,10 +95,16 @@ export async function runDevHeapSnapshot(opts: DevHeapOptions): Promise<void> {
   const snapshotPath = profiler.forceHeapSnapshot();
 
   if (opts.json) {
-    defaultRuntime.log(JSON.stringify({
-      snapshotPath,
-      success: snapshotPath !== null,
-    }, null, 2));
+    defaultRuntime.log(
+      JSON.stringify(
+        {
+          snapshotPath,
+          success: snapshotPath !== null,
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
 
@@ -119,8 +131,7 @@ export function registerDevCli(program: Command): void {
     .description("Development utilities")
     .addHelpText(
       "after",
-      () =>
-        `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/dev", "docs.openclaw.ai/cli/dev")}\n`,
+      () => `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/dev", "docs.openclaw.ai/cli/dev")}\n`,
     );
 
   dev

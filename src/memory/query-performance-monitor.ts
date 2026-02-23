@@ -1,5 +1,5 @@
-import { createSubsystemLogger } from "../logging/subsystem.js";
 import type { QueryPerformanceStats } from "./types.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 
 const log = createSubsystemLogger("memory/query-perf");
 

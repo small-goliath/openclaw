@@ -4,13 +4,13 @@ import type { AppViewState } from "../app-view-state.ts";
 
 // Focus trap configuration
 const FOCUSABLE_SELECTORS = [
-  'button:not([disabled])',
-  'a[href]',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
+  "button:not([disabled])",
+  "a[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
   '[tabindex]:not([tabindex="-1"])',
-].join(', ');
+].join(", ");
 
 /**
  * Gets all focusable elements within a container.
@@ -48,7 +48,7 @@ class FocusTrapController {
     this.isActive = true;
 
     // Set up focus trap event listeners
-    element.addEventListener('keydown', this.handleKeyDown, {
+    element.addEventListener("keydown", this.handleKeyDown, {
       signal: this.abortController.signal,
     });
 
@@ -79,7 +79,7 @@ class FocusTrapController {
   }
 
   private handleKeyDown = (event: KeyboardEvent): void => {
-    if (event.key !== 'Tab' || !this.element) {
+    if (event.key !== "Tab" || !this.element) {
       return;
     }
 
@@ -106,7 +106,9 @@ class FocusTrapController {
   };
 
   private focusFirstElement(): void {
-    if (!this.element) return;
+    if (!this.element) {
+      return;
+    }
     const focusableElements = getFocusableElements(this.element);
     if (focusableElements.length > 0) {
       // Focus the first focusable element (typically the primary action button)

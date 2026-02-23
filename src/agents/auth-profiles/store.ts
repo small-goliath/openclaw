@@ -8,7 +8,6 @@ import {
   getEncryptionService,
   getOrInitEncryption,
   createEncryptionConfigFromEnv,
-  type EncryptedData,
 } from "../../security/encryption.js";
 import { AUTH_STORE_LOCK_OPTIONS, AUTH_STORE_VERSION, log } from "./constants.js";
 import { syncExternalCliCredentials } from "./external-cli-sync.js";

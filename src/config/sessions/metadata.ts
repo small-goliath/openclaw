@@ -4,14 +4,14 @@ import { normalizeChatType } from "../../channels/chat-type.js";
 import { resolveConversationLabel } from "../../channels/conversation-label.js";
 import { getChannelDock } from "../../channels/dock.js";
 import { normalizeChannelId } from "../../channels/plugins/index.js";
-import { normalizeMessageChannel } from "../../utils/message-channel.js";
-import { buildGroupDisplayName, resolveGroupSessionKey } from "./group.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
   getEncryptionService,
   getOrInitEncryption,
   createEncryptionConfigFromEnv,
 } from "../../security/encryption.js";
-import { createSubsystemLogger } from "../../logging/subsystem.js";
+import { normalizeMessageChannel } from "../../utils/message-channel.js";
+import { buildGroupDisplayName, resolveGroupSessionKey } from "./group.js";
 
 const log = createSubsystemLogger("sessions/metadata");
 
@@ -252,14 +252,18 @@ export async function decryptSessionEntry(entry: SessionEntry): Promise<SessionE
 /**
  * Encrypt session origin data.
  */
-export async function encryptSessionOrigin(origin: SessionOrigin): Promise<SessionOrigin | { encrypted: true; data: unknown }> {
+export async function encryptSessionOrigin(
+  origin: SessionOrigin,
+): Promise<SessionOrigin | { encrypted: true; data: unknown }> {
   const service = ensureEncryptionService();
   if (!service.isEnabled()) {
     return origin;
   }
 
   try {
-    return await service.encryptObject(origin) as SessionOrigin | { encrypted: true; data: unknown };
+    return (await service.encryptObject(origin)) as
+      | SessionOrigin
+      | { encrypted: true; data: unknown };
   } catch (err) {
     log.warn("failed to encrypt session origin", { err });
     return origin;
@@ -270,7 +274,7 @@ export async function encryptSessionOrigin(origin: SessionOrigin): Promise<Sessi
  * Decrypt session origin data.
  */
 export async function decryptSessionOrigin(
-  origin: SessionOrigin | { encrypted?: boolean; data?: unknown }
+  origin: SessionOrigin | { encrypted?: boolean; data?: unknown },
 ): Promise<SessionOrigin | undefined> {
   const service = ensureEncryptionService();
 

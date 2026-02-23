@@ -22,8 +22,6 @@ import {
 import { handleGdprApiRequest } from "../compliance/gdpr-api.js";
 import { loadConfig } from "../config/config.js";
 import {
-  type CsrfMiddlewareOptions,
-  csrfProtection,
   getCsrfTokenFromCookie,
   getOrCreateCsrfToken,
   setCsrfCookie,

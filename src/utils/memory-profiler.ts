@@ -11,8 +11,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import v8 from "node:v8";
-import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 
 const log = createSubsystemLogger("memory-profiler");
 
@@ -97,7 +97,8 @@ export class MemoryProfiler {
   constructor(options: MemoryProfilerOptions = {}) {
     this.intervalMs = options.intervalMs ?? 60000; // Default: 1 minute
     this.growthThreshold = options.growthThresholdBytesPerHour ?? 10 * 1024 * 1024; // Default: 10MB/hour
-    this.snapshotDir = options.snapshotDir ?? path.join(resolvePreferredOpenClawTmpDir(), "heap-snapshots");
+    this.snapshotDir =
+      options.snapshotDir ?? path.join(resolvePreferredOpenClawTmpDir(), "heap-snapshots");
     this.maxSnapshots = options.maxSnapshots ?? 1440; // 24 hours at 1 min intervals
     this.saveSnapshots = options.saveSnapshots ?? true;
   }
@@ -122,7 +123,9 @@ export class MemoryProfiler {
       this.checkForLeak();
     }, this.intervalMs);
 
-    log.info(`Memory profiling started (interval: ${this.intervalMs}ms, threshold: ${this.formatBytes(this.growthThreshold)}/hour)`);
+    log.info(
+      `Memory profiling started (interval: ${this.intervalMs}ms, threshold: ${this.formatBytes(this.growthThreshold)}/hour)`,
+    );
   }
 
   /**
@@ -148,9 +151,10 @@ export class MemoryProfiler {
    */
   getStats(): MemoryStats {
     const current = process.memoryUsage();
-    const peakHeapUsed = this.snapshots.length > 0
-      ? Math.max(...this.snapshots.map((s) => s.heapUsed))
-      : current.heapUsed;
+    const peakHeapUsed =
+      this.snapshots.length > 0
+        ? Math.max(...this.snapshots.map((s) => s.heapUsed))
+        : current.heapUsed;
 
     const durationMs = this.startTime ? Date.now() - this.startTime : 0;
     const averageGrowthRate = this.calculateGrowthRate();
@@ -195,7 +199,9 @@ export class MemoryProfiler {
       this.snapshots.shift();
     }
 
-    log.debug(`Snapshot taken: heapUsed=${this.formatBytes(snapshot.heapUsed)}, rss=${this.formatBytes(snapshot.rss)}`);
+    log.debug(
+      `Snapshot taken: heapUsed=${this.formatBytes(snapshot.heapUsed)}, rss=${this.formatBytes(snapshot.rss)}`,
+    );
   }
 
   private checkForLeak(): void {
@@ -207,14 +213,15 @@ export class MemoryProfiler {
 
     if (growthRate > this.growthThreshold) {
       const now = Date.now();
-      const increaseSinceLast = this.snapshots[this.snapshots.length - 1].heapUsed - this.snapshots[0].heapUsed;
+      const increaseSinceLast =
+        this.snapshots[this.snapshots.length - 1].heapUsed - this.snapshots[0].heapUsed;
 
       // Only warn every 5 minutes to avoid spam
       if (now - this.lastWarningTime > this.warningCooldownMs) {
         this.lastWarningTime = now;
         log.warn(
           `Potential memory leak detected: heap growing at ${this.formatBytes(growthRate)}/hour ` +
-          `(increase: ${this.formatBytes(increaseSinceLast)} over ${this.snapshots.length} snapshots)`
+            `(increase: ${this.formatBytes(increaseSinceLast)} over ${this.snapshots.length} snapshots)`,
         );
 
         if (this.saveSnapshots) {
@@ -260,7 +267,9 @@ export class MemoryProfiler {
       log.info(`Heap snapshot saved: ${snapshot}`);
       return snapshot;
     } catch (error) {
-      log.error(`Failed to save heap snapshot: ${error instanceof Error ? error.message : String(error)}`);
+      log.error(
+        `Failed to save heap snapshot: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return null;
     }
   }

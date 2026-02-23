@@ -1,4 +1,5 @@
 import { html, nothing } from "lit";
+import type { VirtualListItem } from "../components/virtual-list.ts";
 import { formatDurationCompact } from "../../../../src/infra/format-time/format-duration.ts";
 import {
   formatCost,
@@ -7,6 +8,7 @@ import {
   formatTokens,
   UsageInsightStats,
 } from "./usage-metrics.ts";
+import "../components/virtual-list.ts";
 import {
   UsageAggregates,
   UsageColumnId,
@@ -14,8 +16,6 @@ import {
   UsageTotals,
   CostDailyEntry,
 } from "./usageTypes.ts";
-import "../components/virtual-list.ts";
-import type { VirtualListItem } from "../components/virtual-list.ts";
 
 function pct(part: number, total: number): number {
   if (total === 0) {
@@ -681,8 +681,7 @@ function renderSessionsCard(
     .filter((entry): entry is UsageSessionEntry => Boolean(entry));
 
   // Prepare virtual list items for "All" tab when there are many sessions
-  const useVirtualScroll =
-    sessionsTab === "all" && sortedWithDir.length > VIRTUAL_SCROLL_THRESHOLD;
+  const useVirtualScroll = sessionsTab === "all" && sortedWithDir.length > VIRTUAL_SCROLL_THRESHOLD;
   const virtualItems: UsageSessionEntryWithId[] = useVirtualScroll
     ? sortedWithDir.map((s) => ({ ...s, id: s.key }))
     : [];
@@ -705,9 +704,11 @@ function renderSessionsCard(
       >
         <div class="session-bar-label">
           <div class="session-bar-title">${displayLabel}</div>
-          ${meta.length > 0
-            ? html`<div class="session-bar-meta">${meta.join(" · ")}</div>`
-            : nothing}
+          ${
+            meta.length > 0
+              ? html`<div class="session-bar-meta">${meta.join(" · ")}</div>`
+              : nothing
+          }
         </div>
         <div class="session-bar-track" style="display: none;"></div>
         <div class="session-bar-actions">

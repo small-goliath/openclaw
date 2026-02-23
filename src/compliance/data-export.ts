@@ -1317,7 +1317,10 @@ export async function rectifyUserData(
     errors: [],
   };
 
-  log.info(`Starting data rectification for user: ${userId}`, { requestId, itemCount: opts.items.length });
+  log.info(`Starting data rectification for user: ${userId}`, {
+    requestId,
+    itemCount: opts.items.length,
+  });
 
   // 감사 로그에 수정 요청 기록
   await logRectificationRequest(userId, requestId, opts);
@@ -1368,9 +1371,12 @@ export async function rectifyUserData(
   }
 
   // 성공 여부 결정 (모든 항목이 실패한 경우만 실패로 간주)
-  const totalUpdated = result.updated.sessions + result.updated.memories +
-                       result.updated.credentials + result.updated.config;
-  result.success = totalUpdated > 0 || (result.errors?.length === 0);
+  const totalUpdated =
+    result.updated.sessions +
+    result.updated.memories +
+    result.updated.credentials +
+    result.updated.config;
+  result.success = totalUpdated > 0 || result.errors?.length === 0;
 
   // 감사 로그에 수정 완료 기록
   await logRectificationCompletion(userId, requestId, result);
@@ -1542,7 +1548,8 @@ async function rectifyConfigData(
 
     // 설정 업데이트 적용
     for (const [key, value] of Object.entries(item.updates)) {
-      if (key in config && key !== "providers") { // providers는 민감 정보 포함
+      if (key in config && key !== "providers") {
+        // providers는 민감 정보 포함
         (config as Record<string, unknown>)[key] = value;
         result.updated++;
       }
@@ -1576,7 +1583,7 @@ async function logRectificationRequest(
     details: {
       requestId,
       itemCount: opts.items.length,
-      categories: opts.items.map(i => i.category),
+      categories: opts.items.map((i) => i.category),
       reason: opts.reason,
     },
   };

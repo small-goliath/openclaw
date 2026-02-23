@@ -417,7 +417,7 @@ export class ConsentStore {
   private async logConsentChange(
     type: ConsentType,
     state: ConsentState,
-    clientIp?: string
+    clientIp?: string,
   ): Promise<void> {
     // IP 주소 해싱 (비동기)
     let ipHash: string | undefined;

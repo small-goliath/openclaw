@@ -311,7 +311,7 @@ export class QmdMemoryManager implements MemorySearchManager {
             return null;
           }
           return { entry, doc };
-        })
+        }),
       );
 
       // Process batch results with error handling for partial success
@@ -352,7 +352,7 @@ export class QmdMemoryManager implements MemorySearchManager {
     // Performance monitoring
     const duration = performance.now() - startTime;
     log.debug(
-      `QMD document resolution completed: ${resolvedCount} resolved, ${failedCount} failed, ${parsed.length} total in ${duration.toFixed(2)}ms`
+      `QMD document resolution completed: ${resolvedCount} resolved, ${failedCount} failed, ${parsed.length} total in ${duration.toFixed(2)}ms`,
     );
 
     return this.clampResultsByInjectedChars(results.slice(0, limit));

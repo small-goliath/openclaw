@@ -5,8 +5,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { runDevHeapStatus, runDevHeapSnapshot } from "./dev-cli.js";
 import { getGlobalMemoryProfiler } from "../utils/memory-profiler.js";
+import { runDevHeapStatus, runDevHeapSnapshot } from "./dev-cli.js";
 
 describe("runDevHeapStatus", () => {
   beforeEach(() => {

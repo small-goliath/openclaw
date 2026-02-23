@@ -24,11 +24,7 @@ export interface VirtualListItem {
 /**
  * Virtual list render function type
  */
-export type VirtualListRenderFn<T> = (
-  item: T,
-  index: number,
-  isSelected?: boolean,
-) => unknown;
+export type VirtualListRenderFn<T> = (item: T, index: number, isSelected?: boolean) => unknown;
 
 /**
  * Virtual list selection handler
@@ -188,9 +184,7 @@ export class VirtualList<T extends VirtualListItem> extends LitElement {
   }
 
   firstUpdated() {
-    this.containerRef = this.renderRoot.querySelector(
-      ".virtual-container",
-    ) as HTMLElement;
+    this.containerRef = this.renderRoot.querySelector(".virtual-container") as HTMLElement;
     if (this.containerRef) {
       this.containerHeight = this.containerRef.clientHeight;
 
@@ -294,10 +288,7 @@ export class VirtualList<T extends VirtualListItem> extends LitElement {
     endIndex = Math.min(this.items.length, endIndex + this.bufferSize);
 
     // Only update if range changed significantly
-    if (
-      startIndex !== this.visibleRange.start ||
-      endIndex !== this.visibleRange.end
-    ) {
+    if (startIndex !== this.visibleRange.start || endIndex !== this.visibleRange.end) {
       this.visibleRange = { start: startIndex, end: endIndex };
     }
   }
@@ -342,8 +333,7 @@ export class VirtualList<T extends VirtualListItem> extends LitElement {
     if (this.containerRef) {
       const { scrollTop, scrollHeight, clientHeight } = this.containerRef;
       const isAtTop = scrollTop <= 0 && e.deltaY < 0;
-      const isAtBottom =
-        scrollTop + clientHeight >= scrollHeight && e.deltaY > 0;
+      const isAtBottom = scrollTop + clientHeight >= scrollHeight && e.deltaY > 0;
 
       // Don't prevent default if at boundaries (allow page scroll)
       if (!isAtTop && !isAtBottom) {
@@ -394,10 +384,7 @@ export class VirtualList<T extends VirtualListItem> extends LitElement {
 
   render() {
     const totalHeight = this.getTotalHeight();
-    const visibleItems = this.items.slice(
-      this.visibleRange.start,
-      this.visibleRange.end,
-    );
+    const visibleItems = this.items.slice(this.visibleRange.start, this.visibleRange.end);
     const selectedSet = new Set(this.selectedKeys);
 
     const containerClasses = classMap({
@@ -437,8 +424,7 @@ export class VirtualList<T extends VirtualListItem> extends LitElement {
                 data-index="${actualIndex}"
                 data-key="${item.id}"
                 ${(el: HTMLElement | null) => this.setItemRef(el, item.id)}
-                @click=${(e: MouseEvent) =>
-                  this.onSelect?.(item.id, e.shiftKey)}
+                @click=${(e: MouseEvent) => this.onSelect?.(item.id, e.shiftKey)}
               >
                 ${this.renderItem(item, actualIndex, isSelected)}
               </div>
@@ -472,9 +458,9 @@ export function createVirtualItems<T extends Record<string, unknown>>(
 /**
  * Helper to adapt session items for virtual list
  */
-export function adaptSessionsForVirtualList<
-  T extends { key: string; id?: string },
->(sessions: T[]): Array<T & VirtualListItem> {
+export function adaptSessionsForVirtualList<T extends { key: string; id?: string }>(
+  sessions: T[],
+): Array<T & VirtualListItem> {
   return sessions.map((session) => ({
     ...session,
     id: session.id ?? session.key,

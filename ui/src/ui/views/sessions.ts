@@ -1,10 +1,10 @@
 import { html, nothing } from "lit";
+import type { VirtualListItem } from "../components/virtual-list.ts";
 import type { GatewaySessionRow, SessionsListResult } from "../types.ts";
 import { formatRelativeTimestamp } from "../format.ts";
 import { pathForTab } from "../navigation.ts";
-import { formatSessionTokens } from "../presenter.ts";
 import "../components/virtual-list.ts";
-import type { VirtualListItem } from "../components/virtual-list.ts";
+import { formatSessionTokens } from "../presenter.ts";
 
 export type SessionsProps = {
   loading: boolean;
@@ -133,9 +133,7 @@ const SESSION_BUFFER_SIZE = 5;
 /**
  * Convert session rows to virtual list items
  */
-function adaptSessionsForVirtualList(
-  rows: GatewaySessionRow[],
-): SessionRowWithId[] {
+function adaptSessionsForVirtualList(rows: GatewaySessionRow[]): SessionRowWithId[] {
   return rows.map((row) => ({
     ...row,
     id: row.key,
@@ -145,9 +143,7 @@ function adaptSessionsForVirtualList(
 export function renderSessions(props: SessionsProps) {
   const rows = props.result?.sessions ?? [];
   const useVirtualScroll = rows.length > VIRTUAL_SCROLL_THRESHOLD;
-  const virtualItems = useVirtualScroll
-    ? adaptSessionsForVirtualList(rows)
-    : [];
+  const virtualItems = useVirtualScroll ? adaptSessionsForVirtualList(rows) : [];
 
   return html`
     <section class="card">
@@ -232,9 +228,11 @@ export function renderSessions(props: SessionsProps) {
 
       <div class="muted" style="margin-top: 12px;">
         ${props.result ? `Store: ${props.result.path}` : ""}
-        ${useVirtualScroll
-          ? html` · <span class="virtual-scroll-badge">Virtual scroll enabled (${rows.length} items)</span>`
-          : nothing}
+        ${
+          useVirtualScroll
+            ? html` · <span class="virtual-scroll-badge">Virtual scroll enabled (${rows.length} items)</span>`
+            : nothing
+        }
       </div>
 
       <div class="table" role="table" aria-label="Sessions list" style="margin-top: 16px;">
@@ -253,7 +251,9 @@ export function renderSessions(props: SessionsProps) {
         </div>
         ${
           rows.length === 0
-            ? html`<div role="status" class="muted">No sessions found.</div>`
+            ? html`
+                <div role="status" class="muted">No sessions found.</div>
+              `
             : useVirtualScroll
               ? html`
                   <virtual-list

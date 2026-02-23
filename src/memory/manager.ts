@@ -29,12 +29,12 @@ import { isMemoryPath, normalizeExtraMemoryPaths } from "./internal.js";
 import { memoryManagerEmbeddingOps } from "./manager-embedding-ops.js";
 import { searchKeyword, searchVector } from "./manager-search.js";
 import { memoryManagerSyncOps } from "./manager-sync-ops.js";
+import { QueryPerformanceMonitor } from "./query-performance-monitor.js";
 import {
   PreparedStatementCache,
   createStatementCache,
   type PreparedStatementCacheStats,
 } from "./sqlite-cache.js";
-import { QueryPerformanceMonitor } from "./query-performance-monitor.js";
 const SNIPPET_MAX_CHARS = 700;
 const VECTOR_TABLE = "chunks_vec";
 const FTS_TABLE = "chunks_fts";

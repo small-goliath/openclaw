@@ -11,10 +11,14 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { AuthRateLimiter } from "../gateway/auth-rate-limit.js";
+import { loadConfig, resolveConfigPath } from "../config/config.js";
 import { authorizeGatewayConnect, type ResolvedGatewayAuth } from "../gateway/auth.js";
 import { getBearerToken } from "../gateway/http-utils.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { getConsentStore } from "./consent-store.js";
 import {
   exportUserData,
   exportPortableData,
@@ -26,10 +30,6 @@ import {
   type DataRectificationOptions,
   type UserDataCategory,
 } from "./data-export.js";
-import { getConsentStore } from "./consent-store.js";
-import fs from "node:fs/promises";
-import path from "node:path";
-import { loadConfig, resolveConfigPath } from "../config/config.js";
 
 const log = createSubsystemLogger("compliance/gdpr-api");
 
@@ -684,7 +684,7 @@ async function handleRightToObject(
     // purposes 유효성 검증
     const validPurposes: ObjectionPurpose[] = ["marketing", "profiling", "third_party_sharing"];
     const invalidPurposes = objectionRequest.purposes.filter(
-      (p): p is string => !validPurposes.includes(p as ObjectionPurpose)
+      (p): p is string => !validPurposes.includes(p as ObjectionPurpose),
     );
 
     if (invalidPurposes.length > 0) {
@@ -747,9 +747,7 @@ async function handleRightToObject(
     }
 
     // 성공 여부 결정
-    const allFailed = Object.values(result.details).every(
-      (detail) => detail?.status === "failed"
-    );
+    const allFailed = Object.values(result.details).every((detail) => detail?.status === "failed");
     result.success = !allFailed;
 
     // 감사 로그 기록
@@ -883,7 +881,9 @@ async function processThirdPartySharingObjection(
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    log.error(`Failed to process third-party sharing objection for user: ${userId}`, { error: errorMsg });
+    log.error(`Failed to process third-party sharing objection for user: ${userId}`, {
+      error: errorMsg,
+    });
     return {
       status: "failed",
       message: `제3자 공유 비활성화 실패: ${errorMsg}`,
