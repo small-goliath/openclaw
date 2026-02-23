@@ -6,11 +6,16 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # 매일 UTC 00:00에 실행
+    # Run daily at UTC 00:00
     - cron: "0 0 * * *"
   workflow_dispatch:
 
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "10.23.0"
+
 jobs:
+  # Job 1: NPM Audit - Run pnpm audit to check for vulnerabilities
   npm-audit:
     name: NPM Audit
     runs-on: ubuntu-latest
@@ -21,23 +26,38 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: "npm"
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
         with:
-          version: "10.23.0"
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run npm audit
+      - name: Run security audit
+        id: audit
         run: |
-          pnpm audit --audit-level=high --json > audit-results.json || true
+          echo "Running pnpm audit with --audit-level high..."
+          pnpm audit --audit-level high --json > audit-results.json || AUDIT_EXIT_CODE=$?
           cat audit-results.json
+          echo "audit_exit_code=${AUDIT_EXIT_CODE:-0}" >> $GITHUB_OUTPUT
 
-      - name: Check for critical vulnerabilities
+      - name: Check for high/critical vulnerabilities
         run: |
           CRITICAL_COUNT=$(cat audit-results.json | jq '.metadata.vulnerabilities.critical // 0')
           HIGH_COUNT=$(cat audit-results.json | jq '.metadata.vulnerabilities.high // 0')
@@ -45,10 +65,19 @@ jobs:
           echo "Critical vulnerabilities: $CRITICAL_COUNT"
           echo "High vulnerabilities: $HIGH_COUNT"
 
-          if [ "$CRITICAL_COUNT" -gt 0 ]; then
-            echo "::error::Critical vulnerabilities found!"
+          # Block build if any high or critical vulnerabilities found
+          if [ "$CRITICAL_COUNT" -gt 0 ] || [ "$HIGH_COUNT" -gt 0 ]; then
+            echo "::error::High or critical vulnerabilities found!"
+            echo "::error::Critical: $CRITICAL_COUNT, High: $HIGH_COUNT"
+
+            # Output details of vulnerabilities
+            echo "Vulnerability details:"
+            cat audit-results.json | jq '.advisories | to_entries[] | select(.value.severity == "critical" or .value.severity == "high") | {module_name: .value.module_name, severity: .value.severity, title: .value.title, url: .value.url}'
+
             exit 1
           fi
+
+          echo "No high or critical vulnerabilities found."
 
       - name: Upload audit results
         uses: actions/upload-artifact@v4
@@ -56,7 +85,79 @@ jobs:
         with:
           name: npm-audit-results
           path: audit-results.json
+          retention-days: 30
 
+  # Job 2: Check for outdated dependencies
+  outdated-packages:
+    name: Check Outdated Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check for outdated packages
+        run: |
+          echo "Checking for outdated packages..."
+          pnpm outdated --json > outdated-report.json || true
+          cat outdated-report.json
+
+      - name: Analyze outdated packages
+        run: |
+          echo "Analyzing outdated dependencies..."
+
+          # Count outdated packages by severity
+          MAJOR=$(cat outdated-report.json | jq '[.[] | select(.current != null and .latest != null)] | map(select(.current | split(".")[0] != (.latest | split(".")[0]))) | length' 2>/dev/null || echo "0")
+          MINOR=$(cat outdated-report.json | jq '[.[] | select(.current != null and .latest != null)] | map(select(.current | split(".")[0] == (.latest | split(".")[0]) and .current | split(".")[1] != (.latest | split(".")[1]))) | length' 2>/dev/null || echo "0")
+          PATCH=$(cat outdated-report.json | jq '[.[] | select(.current != null and .latest != null)] | map(select(.current | split(".")[0] == (.latest | split(".")[0]) and .current | split(".")[1] == (.latest | split(".")[1]) and .current | split(".")[2] != (.latest | split(".")[2]))) | length' 2>/dev/null || echo "0")
+
+          echo "Major version outdated: $MAJOR"
+          echo "Minor version outdated: $MINOR"
+          echo "Patch version outdated: $PATCH"
+
+          # Output summary
+          echo "## Outdated Dependencies Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Major    | $MAJOR |" >> $GITHUB_STEP_SUMMARY
+          echo "| Minor    | $MINOR |" >> $GITHUB_STEP_SUMMARY
+          echo "| Patch    | $PATCH |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload outdated report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: outdated-packages-report
+          path: outdated-report.json
+          retention-days: 30
+
+  # Job 3: Snyk Security Scan (runs on schedule and manual trigger)
   snyk-scan:
     name: Snyk Security Scan
     runs-on: ubuntu-latest
@@ -68,13 +169,28 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: "npm"
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
         with:
-          version: "10.23.0"
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Install Snyk
         run: npm install -g snyk
@@ -92,7 +208,9 @@ jobs:
         with:
           name: snyk-scan-results
           path: snyk-results.json
+          retention-days: 30
 
+  # Job 4: CodeQL Analysis for deep security scanning
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
@@ -100,12 +218,10 @@ jobs:
       actions: read
       contents: read
       security-events: write
-
     strategy:
       fail-fast: false
       matrix:
         language: ["javascript", "typescript"]
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -124,6 +240,7 @@ jobs:
         with:
           category: "/language:${{matrix.language}}"
 
+  # Job 5: OWASP ZAP Scan (runs on schedule and manual trigger)
   owasp-zap:
     name: OWASP ZAP Scan
     runs-on: ubuntu-latest
@@ -135,13 +252,25 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
         with:
-          version: "10.23.0"
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: "pnpm"
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -168,7 +297,9 @@ jobs:
         with:
           name: zap-reports
           path: report_*.html
+          retention-days: 30
 
+  # Job 6: OpenClaw Security Audit
   openclaw-audit:
     name: OpenClaw Security Audit
     runs-on: ubuntu-latest
@@ -179,13 +310,25 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
         with:
-          version: "10.23.0"
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: "pnpm"
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -211,40 +354,63 @@ jobs:
         with:
           name: openclaw-audit-report
           path: openclaw-audit-report.json
+          retention-days: 30
 
+  # Job 7: Generate Security Summary
   generate-summary:
     name: Generate Security Summary
-    needs: [npm-audit, snyk-scan, codeql, owasp-zap, openclaw-audit]
+    needs: [npm-audit, outdated-packages, snyk-scan, codeql, owasp-zap, openclaw-audit]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
       - name: Generate summary
         run: |
           echo "# Security Audit Summary" > security-summary.md
           echo "" >> security-summary.md
-          echo "Date: $(date)" >> security-summary.md
+          echo "Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> security-summary.md
+          echo "Workflow Run: ${{ github.run_id }}" >> security-summary.md
+          echo "Commit: ${{ github.sha }}" >> security-summary.md
           echo "" >> security-summary.md
 
           echo "## NPM Audit" >> security-summary.md
-          if [ -f npm-audit-results/audit-results.json ]; then
-            CRITICAL=$(jq '.metadata.vulnerabilities.critical // 0' npm-audit-results/audit-results.json)
-            HIGH=$(jq '.metadata.vulnerabilities.high // 0' npm-audit-results/audit-results.json)
+          if [ -f artifacts/npm-audit-results/audit-results.json ]; then
+            CRITICAL=$(jq '.metadata.vulnerabilities.critical // 0' artifacts/npm-audit-results/audit-results.json)
+            HIGH=$(jq '.metadata.vulnerabilities.high // 0' artifacts/npm-audit-results/audit-results.json)
+            MODERATE=$(jq '.metadata.vulnerabilities.moderate // 0' artifacts/npm-audit-results/audit-results.json)
+            LOW=$(jq '.metadata.vulnerabilities.low // 0' artifacts/npm-audit-results/audit-results.json)
             echo "- Critical: $CRITICAL" >> security-summary.md
             echo "- High: $HIGH" >> security-summary.md
+            echo "- Moderate: $MODERATE" >> security-summary.md
+            echo "- Low: $LOW" >> security-summary.md
+          else
+            echo "- Status: No results available" >> security-summary.md
+          fi
+          echo "" >> security-summary.md
+
+          echo "## Outdated Dependencies" >> security-summary.md
+          if [ -f artifacts/outdated-packages-report/outdated-report.json ]; then
+            COUNT=$(jq 'length' artifacts/outdated-packages-report/outdated-report.json)
+            echo "- Total outdated packages: $COUNT" >> security-summary.md
+          else
+            echo "- Status: No results available" >> security-summary.md
           fi
           echo "" >> security-summary.md
 
           echo "## OpenClaw Security Audit" >> security-summary.md
-          if [ -f openclaw-audit-report/openclaw-audit-report.json ]; then
-            CRITICAL=$(jq '.summary.critical' openclaw-audit-report/openclaw-audit-report.json)
-            WARN=$(jq '.summary.warn' openclaw-audit-report/openclaw-audit-report.json)
-            INFO=$(jq '.summary.info' openclaw-audit-report/openclaw-audit-report.json)
+          if [ -f artifacts/openclaw-audit-report/openclaw-audit-report.json ]; then
+            CRITICAL=$(jq '.summary.critical // 0' artifacts/openclaw-audit-report/openclaw-audit-report.json)
+            WARN=$(jq '.summary.warn // 0' artifacts/openclaw-audit-report/openclaw-audit-report.json)
+            INFO=$(jq '.summary.info // 0' artifacts/openclaw-audit-report/openclaw-audit-report.json)
             echo "- Critical: $CRITICAL" >> security-summary.md
             echo "- Warnings: $WARN" >> security-summary.md
             echo "- Info: $INFO" >> security-summary.md
+          else
+            echo "- Status: No results available" >> security-summary.md
           fi
           echo "" >> security-summary.md
 
@@ -252,8 +418,16 @@ jobs:
           echo "- Status: Completed" >> security-summary.md
           echo "" >> security-summary.md
 
+          echo "## Snyk Scan" >> security-summary.md
+          if [ -f artifacts/snyk-scan-results/snyk-results.json ]; then
+            echo "- Status: Completed" >> security-summary.md
+          else
+            echo "- Status: Skipped or Failed" >> security-summary.md
+          fi
+          echo "" >> security-summary.md
+
           echo "## OWASP ZAP" >> security-summary.md
-          if [ -d zap-reports ]; then
+          if [ -d artifacts/zap-reports ]; then
             echo "- Status: Completed" >> security-summary.md
           else
             echo "- Status: Skipped or Failed" >> security-summary.md
@@ -266,26 +440,31 @@ jobs:
         with:
           name: security-summary
           path: security-summary.md
+          retention-days: 30
 
+      - name: Add to job summary
+        run: cat security-summary.md >> $GITHUB_STEP_SUMMARY
+
+  # Job 8: Notify on Failure
   notify:
     name: Notify on Failure
-    needs: [npm-audit, codeql, openclaw-audit]
+    needs: [npm-audit, outdated-packages, codeql, openclaw-audit]
     runs-on: ubuntu-latest
     if: failure() && (github.event_name == 'schedule' || github.event_name == 'push')
     steps:
       - name: Send Slack notification
-        if: secrets.SLACK_WEBHOOK_URL != ''
+        if: env.SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v1
         with:
           payload: |
             {
-              "text": "🚨 Security Audit Failed!",
+              "text": "Security Audit Failed!",
               "blocks": [
                 {
                   "type": "header",
                   "text": {
                     "type": "plain_text",
-                    "text": "🚨 Security Audit Failed"
+                    "text": "Security Audit Failed"
                   }
                 },
                 {
@@ -306,6 +485,14 @@ jobs:
                     {
                       "type": "mrkdwn",
                       "text": "*Triggered by:*\n${{ github.actor }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Event:*\n${{ github.event_name }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Failed Jobs:*\n${{ join(needs.*.result, ', ') }}"
                     }
                   ]
                 },
@@ -318,7 +505,8 @@ jobs:
                         "type": "plain_text",
                         "text": "View Workflow"
                       },
-                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+                      "style": "danger"
                     }
                   ]
                 }
@@ -328,21 +516,24 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
       - name: Send email notification
-        if: secrets.SECURITY_TEAM_EMAIL != ''
+        if: env.SECURITY_TEAM_EMAIL != ''
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
           server_port: 587
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "🚨 Security Audit Failed - ${{ github.repository }}"
+          subject: "Security Audit Failed - ${{ github.repository }}"
           to: ${{ secrets.SECURITY_TEAM_EMAIL }}
-          from: ${{ secrets.EMAIL_FROM }}
+          from: ${{ secrets.EMAIL_FROM || secrets.EMAIL_USERNAME }}
           body: |
             Security audit failed for ${{ github.repository }}.
 
             Branch: ${{ github.ref }}
             Commit: ${{ github.sha }}
             Triggered by: ${{ github.actor }}
+            Event: ${{ github.event_name }}
 
             View workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Please investigate the security issues immediately.

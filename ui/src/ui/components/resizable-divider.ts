@@ -18,6 +18,7 @@ export class ResizableDivider extends LitElement {
   @property({ type: Number }) minRatio = 0.4;
   @property({ type: Number }) maxRatio = 0.7;
   @property({ type: String }) ariaLabel = "패널 크기 조절";
+  @property({ type: String }) ariaLabelLang = "ko";
 
   private isDragging = false;
   private startX = 0;
@@ -62,6 +63,7 @@ export class ResizableDivider extends LitElement {
         aria-valuemin="${Math.round(this.minRatio * 100)}"
         aria-valuemax="${Math.round(this.maxRatio * 100)}"
         aria-label="${this.ariaLabel}"
+        lang="${this.ariaLabelLang}"
         tabindex="0"
       ></div>
     `;

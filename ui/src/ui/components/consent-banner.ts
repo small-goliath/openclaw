@@ -811,10 +811,10 @@ export class ConsentBanner extends LitElement {
               </svg>
             </div>
             <div class="banner-title-section">
-              <h2 id="consent-title" class="banner-title">쿠키 및 개인정보 처리 동의</h2>
-              <p class="banner-description">
-                저희 서비스는 최상의 경험을 제공하기 위해 쿠키를 사용합니다. 
-                아래에서 각 유형의 쿠키 사용에 대한 동의 여부를 선택하실 수 있습니다. 
+              <h2 id="consent-title" class="banner-title" lang="ko">쿠키 및 개인정보 처리 동의</h2>
+              <p class="banner-description" lang="ko">
+                저희 서비스는 최상의 경험을 제공하기 위해 쿠키를 사용합니다.
+                아래에서 각 유형의 쿠키 사용에 대한 동의 여부를 선택하실 수 있습니다.
                 필수 쿠키는 서비스 제공을 위해 필요하며 비활성화할 수 없습니다.
               </p>
             </div>
@@ -822,27 +822,29 @@ export class ConsentBanner extends LitElement {
               class="banner-close" 
               @click="${this.closeBanner}"
               aria-label="배너 닫기"
+              lang="ko"
             >
               ${ICONS["x"]}
             </button>
           </div>
 
           <div class="banner-actions">
-            <button class="btn btn-secondary" @click="${this.acceptNecessaryOnly}">
+            <button class="btn btn-secondary" @click="${this.acceptNecessaryOnly}" lang="ko">
               필수만 수락
             </button>
-            <button class="btn btn-secondary" @click="${this.acceptAll}">
+            <button class="btn btn-secondary" @click="${this.acceptAll}" lang="ko">
               모두 수락
             </button>
-            <button class="btn btn-ghost" @click="${this.savePreferencesAndClose}">
+            <button class="btn btn-ghost" @click="${this.savePreferencesAndClose}" lang="ko">
               설정 저장
             </button>
           </div>
 
-          <button 
-            class="details-toggle ${this.showDetails ? "expanded" : ""}" 
+          <button
+            class="details-toggle ${this.showDetails ? "expanded" : ""}"
             @click="${this.toggleDetails}"
             aria-expanded="${this.showDetails}"
+            lang="ko"
           >
             <span>상세 설정</span>
             ${ICONS["chevron-down"]}
@@ -861,23 +863,24 @@ export class ConsentBanner extends LitElement {
                         ${ICONS[item.icon]}
                       </div>
                       <div class="consent-item-info">
-                        <h3 class="consent-item-title">
+                        <h3 class="consent-item-title" lang="ko">
                           ${item.title}
                           ${
                             item.required
                               ? html`
-                                  <span class="consent-item-required">필수</span>
+                                  <span class="consent-item-required" lang="ko">필수</span>
                                 `
                               : nothing
                           }
                         </h3>
-                        <p class="consent-item-description">${item.description}</p>
+                        <p class="consent-item-description" lang="ko">${item.description}</p>
                       </div>
                       <button
                         class="expand-btn"
                         @click="${() => this.toggleItemExpand(item.key)}"
                         aria-label="${isExpanded ? "접기" : "펼치기"}"
                         aria-expanded="${isExpanded}"
+                        lang="ko"
                       >
                         ${ICONS["chevron-down"]}
                       </button>
@@ -887,12 +890,13 @@ export class ConsentBanner extends LitElement {
                         role="switch"
                         aria-checked="${isActive}"
                         aria-label="${item.title} 토글"
+                        lang="ko"
                         tabindex="${item.required ? "-1" : "0"}"
                       ></div>
                     </div>
                     <div class="consent-item-details">
-                      <ul class="purposes-list">
-                        ${this.getPurposes(item.key).map((purpose) => html`<li>${purpose}</li>`)}
+                      <ul class="purposes-list" lang="ko">
+                        ${this.getPurposes(item.key).map((purpose) => html`<li lang="ko">${purpose}</li>`)}
                       </ul>
                     </div>
                   </div>
@@ -900,11 +904,12 @@ export class ConsentBanner extends LitElement {
               })}
             </div>
 
-            <a 
-              href="${this.privacyPolicyUrl}" 
+            <a
+              href="${this.privacyPolicyUrl}"
               class="privacy-link"
               target="_blank"
               rel="noopener noreferrer"
+              lang="ko"
             >
               개인정보 처리방침 전문 보기
               ${ICONS["external-link"]}
