@@ -72,7 +72,6 @@ apps/ios/*.mobileprovision
 docs/.local/
 .taskmaster/
 .claude/
-security/
 IDENTITY.md
 USER.md
 .tgz
