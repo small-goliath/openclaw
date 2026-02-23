@@ -6,6 +6,7 @@ import {
 } from "../../agents/auth-profiles.js";
 import {
   ensureAuthProfileStore,
+  ensureAuthProfileStoreSync,
   getCustomProviderApiKey,
   resolveAuthProfileOrder,
   resolveEnvApiKey,
@@ -34,7 +35,7 @@ export const resolveAuthLabel = async (
   mode: ModelAuthDetailMode = "compact",
 ): Promise<{ label: string; source: string }> => {
   const formatPath = (value: string) => shortenHomePath(value);
-  const store = ensureAuthProfileStore(agentDir, {
+  const store = await ensureAuthProfileStore(agentDir, {
     allowKeychainPrompt: false,
   });
   const order = resolveAuthProfileOrder({ cfg, store, provider });
@@ -230,7 +231,7 @@ export const resolveProfileOverride = (params: {
   if (!raw) {
     return {};
   }
-  const store = ensureAuthProfileStore(params.agentDir, {
+  const store = ensureAuthProfileStoreSync(params.agentDir, {
     allowKeychainPrompt: false,
   });
   const profile = store.profiles[raw];

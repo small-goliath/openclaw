@@ -48,20 +48,32 @@ const log = createSubsystemLogger("memory");
 
 // LRU Cache 설정 환경 변수
 function resolveMemoryCacheConfig() {
-  const maxSize = parseInt(process.env.OPENCLAW_MEMORY_CACHE_MAX_SIZE?.trim() ?? "100", 10);
-  const defaultTTL = parseInt(process.env.OPENCLAW_MEMORY_CACHE_TTL_MS?.trim() ?? "3600000", 10); // 1시간
-  const sessionTTL = parseInt(process.env.OPENCLAW_MEMORY_SESSION_TTL_MS?.trim() ?? "1800000", 10); // 30분
-  const cleanupInterval = parseInt(
-    process.env.OPENCLAW_MEMORY_CLEANUP_INTERVAL_MS?.trim() ?? "300000",
-    10,
-  ); // 5분
+  const rawMaxSize = process.env.OPENCLAW_MEMORY_CACHE_MAX_SIZE?.trim();
+  const parsedMaxSize = parseInt(rawMaxSize ?? "100", 10);
+  const maxSize = Number.isFinite(parsedMaxSize) && parsedMaxSize > 0 ? parsedMaxSize : 100;
+
+  const rawDefaultTTL = process.env.OPENCLAW_MEMORY_CACHE_TTL_MS?.trim();
+  const parsedDefaultTTL = parseInt(rawDefaultTTL ?? "3600000", 10); // 1시간
+  const defaultTTL =
+    Number.isFinite(parsedDefaultTTL) && parsedDefaultTTL > 0 ? parsedDefaultTTL : 3600000;
+
+  const rawSessionTTL = process.env.OPENCLAW_MEMORY_SESSION_TTL_MS?.trim();
+  const parsedSessionTTL = parseInt(rawSessionTTL ?? "1800000", 10); // 30분
+  const sessionTTL =
+    Number.isFinite(parsedSessionTTL) && parsedSessionTTL > 0 ? parsedSessionTTL : 1800000;
+
+  const rawCleanupInterval = process.env.OPENCLAW_MEMORY_CLEANUP_INTERVAL_MS?.trim();
+  const parsedCleanupInterval = parseInt(rawCleanupInterval ?? "300000", 10); // 5분
+  const cleanupInterval =
+    Number.isFinite(parsedCleanupInterval) && parsedCleanupInterval > 0
+      ? parsedCleanupInterval
+      : 300000;
 
   return {
-    maxSize: Number.isFinite(maxSize) && maxSize > 0 ? maxSize : 100,
-    defaultTTL: Number.isFinite(defaultTTL) && defaultTTL > 0 ? defaultTTL : 3600000,
-    sessionTTL: Number.isFinite(sessionTTL) && sessionTTL > 0 ? sessionTTL : 1800000,
-    cleanupInterval:
-      Number.isFinite(cleanupInterval) && cleanupInterval > 0 ? cleanupInterval : 300000,
+    maxSize,
+    defaultTTL,
+    sessionTTL,
+    cleanupInterval,
   };
 }
 
@@ -191,7 +203,7 @@ export class MemoryIndexManager implements MemorySearchManager {
     this.voyage = params.providerResult.voyage;
     this.sources = new Set(params.settings.sources);
     this.db = this.openDatabase();
-    this.stmtCache = createStatementCache(this.db, params.cfg.env);
+    this.stmtCache = createStatementCache(this.db, process.env);
     this.providerKey = this.computeProviderKey();
     this.cache = {
       enabled: params.settings.cache.enabled,

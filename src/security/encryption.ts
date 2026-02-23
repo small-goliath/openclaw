@@ -497,10 +497,22 @@ export class KeyManager {
   private async handleKeychainFailure(keyBase64: string, newKey: Buffer): Promise<Buffer | null> {
     // Critical 보안 알림
     await alertCriticalEvent({
-      type: "encryption_key_file_fallback",
-      severity: "high",
-      message: "OS keychain storage failed, falling back to file-based storage",
-      timestamp: Date.now(),
+      id: crypto.randomUUID(),
+      eventType: "SUSPICIOUS_ACTIVITY",
+      severity: "critical",
+      timestamp: new Date().toISOString(),
+      correlationId: crypto.randomUUID(),
+      source: {
+        component: "encryption",
+        host: "localhost",
+        version: "1.0.0",
+      },
+      details: {
+        activityType: "unusual_api_usage",
+        description: "OS keychain storage failed, falling back to file-based storage",
+        riskScore: 75,
+        indicators: ["keychain_failure", "file_fallback"],
+      },
     });
 
     log.warn(
@@ -540,11 +552,21 @@ export class KeyManager {
 
       // SIEM 로깅
       await logSecurityEvent({
-        type: "key_file_fallback_used",
-        keyPath,
-        permissions: mode,
-        checksum,
-        timestamp: Date.now(),
+        id: crypto.randomUUID(),
+        eventType: "CONFIG_CHANGE",
+        severity: "high",
+        timestamp: new Date().toISOString(),
+        correlationId: crypto.randomUUID(),
+        source: {
+          component: "encryption",
+          host: "localhost",
+          version: "1.0.0",
+        },
+        details: {
+          changeType: "create",
+          configPath: keyPath,
+          changedBy: "system",
+        },
       });
 
       // Log file storage details for audit
@@ -568,10 +590,22 @@ export class KeyManager {
    */
   private async notifyKeychainFailure(reason: string): Promise<void> {
     await alertCriticalEvent({
-      type: "keychain_failure",
-      reason,
-      timestamp: Date.now(),
+      id: crypto.randomUUID(),
+      eventType: "SUSPICIOUS_ACTIVITY",
       severity: "critical",
+      timestamp: new Date().toISOString(),
+      correlationId: crypto.randomUUID(),
+      source: {
+        component: "encryption",
+        host: "localhost",
+        version: "1.0.0",
+      },
+      details: {
+        activityType: "unusual_api_usage",
+        description: `Keychain failure: ${reason}`,
+        riskScore: 90,
+        indicators: ["keychain_failure", reason],
+      },
     });
   }
 
@@ -594,9 +628,22 @@ export class KeyManager {
       if (storedChecksum !== computedChecksum) {
         log.error("SECURITY: Key file integrity check failed!");
         await alertCriticalEvent({
-          type: "encryption_key_integrity_failure",
-          keyPath,
-          timestamp: Date.now(),
+          id: crypto.randomUUID(),
+          eventType: "SUSPICIOUS_ACTIVITY",
+          severity: "critical",
+          timestamp: new Date().toISOString(),
+          correlationId: crypto.randomUUID(),
+          source: {
+            component: "encryption",
+            host: "localhost",
+            version: "1.0.0",
+          },
+          details: {
+            activityType: "data_scraping",
+            description: `Key file integrity check failed: ${keyPath}`,
+            riskScore: 95,
+            indicators: ["integrity_failure", keyPath],
+          },
         });
         return false;
       }
@@ -618,10 +665,22 @@ export class KeyManager {
       if (!keyId) {
         log.error("AWS KMS Key ID not configured");
         await alertCriticalEvent({
-          type: "encryption_key_failure",
-          provider: "aws-kms",
-          reason: "key_id_missing",
-          timestamp: Date.now(),
+          id: crypto.randomUUID(),
+          eventType: "SUSPICIOUS_ACTIVITY",
+          severity: "critical",
+          timestamp: new Date().toISOString(),
+          correlationId: crypto.randomUUID(),
+          source: {
+            component: "encryption",
+            host: "localhost",
+            version: "1.0.0",
+          },
+          details: {
+            activityType: "unusual_api_usage",
+            description: "AWS KMS Key ID not configured",
+            riskScore: 80,
+            indicators: ["aws_kms", "key_id_missing"],
+          },
         });
         return null;
       }
@@ -637,11 +696,12 @@ export class KeyManager {
           const decryptCommand = new DecryptCommand({
             CiphertextBlob: Buffer.from(encryptedKey, "base64"),
           });
-          const decryptResponse = await client.send(decryptCommand);
+          const decryptResponse = (await client.send(decryptCommand)) as { Plaintext?: Uint8Array };
 
-          if (decryptResponse.Plaintext) {
+          const plaintext = decryptResponse.Plaintext;
+          if (plaintext instanceof Uint8Array) {
             log.info("AWS KMS: decrypted existing data key");
-            return Buffer.from(decryptResponse.Plaintext);
+            return Buffer.from(plaintext);
           }
         } catch (err) {
           log.warn("AWS KMS: failed to decrypt existing key, generating new one", { err });
@@ -654,39 +714,69 @@ export class KeyManager {
         KeySpec: "AES_256",
       });
 
-      const response = await client.send(command);
+      const response = (await client.send(command)) as {
+        Plaintext?: Uint8Array;
+        CiphertextBlob?: Uint8Array;
+      };
 
-      if (!response.Plaintext || !response.CiphertextBlob) {
+      const responsePlaintext = response.Plaintext;
+      const responseCiphertextBlob = response.CiphertextBlob;
+      if (
+        !(responsePlaintext instanceof Uint8Array) ||
+        !(responseCiphertextBlob instanceof Uint8Array)
+      ) {
         throw new Error("KMS GenerateDataKey returned empty response");
       }
 
       // 암호화된 데이터 키 저장 (나중에 복호화용)
-      const encryptedKey = Buffer.from(response.CiphertextBlob).toString("base64");
+      const encryptedKey = Buffer.from(responseCiphertextBlob).toString("base64");
       fs.mkdirSync(path.dirname(encryptedKeyPath), { recursive: true, mode: 0o700 });
       fs.writeFileSync(encryptedKeyPath, encryptedKey, { mode: 0o600 });
 
       // 평문 데이터 키 반환 (메모리에만 유지)
-      const plaintextKey = Buffer.from(response.Plaintext);
+      const plaintextKey = Buffer.from(responsePlaintext);
 
       log.info("AWS KMS: generated new data key", { keyId });
 
       // SIEM 로깅
       await logSecurityEvent({
-        type: "encryption_key_generated",
-        provider: "aws-kms",
-        keyId,
-        timestamp: Date.now(),
+        id: crypto.randomUUID(),
+        eventType: "CONFIG_CHANGE",
+        severity: "info",
+        timestamp: new Date().toISOString(),
+        correlationId: crypto.randomUUID(),
+        source: {
+          component: "encryption",
+          host: "localhost",
+          version: "1.0.0",
+        },
+        details: {
+          changeType: "create",
+          configPath: `aws-kms://${keyId}`,
+          changedBy: "system",
+        },
       });
 
       return plaintextKey;
     } catch (err) {
       log.error("AWS KMS operation failed", { err });
       await alertCriticalEvent({
-        type: "encryption_key_failure",
-        provider: "aws-kms",
-        reason: "operation_failed",
-        error: String(err),
-        timestamp: Date.now(),
+        id: crypto.randomUUID(),
+        eventType: "SUSPICIOUS_ACTIVITY",
+        severity: "critical",
+        timestamp: new Date().toISOString(),
+        correlationId: crypto.randomUUID(),
+        source: {
+          component: "encryption",
+          host: "localhost",
+          version: "1.0.0",
+        },
+        details: {
+          activityType: "unusual_api_usage",
+          description: `AWS KMS operation failed: ${String(err)}`,
+          riskScore: 85,
+          indicators: ["aws_kms", "operation_failed"],
+        },
       });
       return null;
     }
@@ -708,10 +798,22 @@ export class KeyManager {
       if (!vaultUrl || !keyName) {
         log.error("Azure Key Vault configuration missing");
         await alertCriticalEvent({
-          type: "encryption_key_failure",
-          provider: "azure-keyvault",
-          reason: "configuration_missing",
-          timestamp: Date.now(),
+          id: crypto.randomUUID(),
+          eventType: "SUSPICIOUS_ACTIVITY",
+          severity: "critical",
+          timestamp: new Date().toISOString(),
+          correlationId: crypto.randomUUID(),
+          source: {
+            component: "encryption",
+            host: "localhost",
+            version: "1.0.0",
+          },
+          details: {
+            activityType: "unusual_api_usage",
+            description: "Azure Key Vault configuration missing",
+            riskScore: 80,
+            indicators: ["azure_keyvault", "configuration_missing"],
+          },
         });
         return null;
       }
@@ -771,21 +873,43 @@ export class KeyManager {
 
       // SIEM 로깅
       await logSecurityEvent({
-        type: "encryption_key_generated",
-        provider: "azure-keyvault",
-        keyName,
-        timestamp: Date.now(),
+        id: crypto.randomUUID(),
+        eventType: "CONFIG_CHANGE",
+        severity: "info",
+        timestamp: new Date().toISOString(),
+        correlationId: crypto.randomUUID(),
+        source: {
+          component: "encryption",
+          host: "localhost",
+          version: "1.0.0",
+        },
+        details: {
+          changeType: "create",
+          configPath: `azure-keyvault://${keyName}`,
+          changedBy: "system",
+        },
       });
 
       return dataKey;
     } catch (err) {
       log.error("Azure Key Vault operation failed", { err });
       await alertCriticalEvent({
-        type: "encryption_key_failure",
-        provider: "azure-keyvault",
-        reason: "operation_failed",
-        error: String(err),
-        timestamp: Date.now(),
+        id: crypto.randomUUID(),
+        eventType: "SUSPICIOUS_ACTIVITY",
+        severity: "critical",
+        timestamp: new Date().toISOString(),
+        correlationId: crypto.randomUUID(),
+        source: {
+          component: "encryption",
+          host: "localhost",
+          version: "1.0.0",
+        },
+        details: {
+          activityType: "unusual_api_usage",
+          description: `Azure Key Vault operation failed: ${String(err)}`,
+          riskScore: 85,
+          indicators: ["azure_keyvault", "operation_failed"],
+        },
       });
       return null;
     }

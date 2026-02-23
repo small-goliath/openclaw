@@ -11,6 +11,7 @@ import {
 import {
   type AuthProfileStore,
   ensureAuthProfileStore,
+  ensureAuthProfileStoreSync,
   listProfilesForProvider,
   resolveApiKeyForProfile,
   resolveAuthProfileOrder,
@@ -18,7 +19,11 @@ import {
 } from "./auth-profiles.js";
 import { normalizeProviderId } from "./model-selection.js";
 
-export { ensureAuthProfileStore, resolveAuthProfileOrder } from "./auth-profiles.js";
+export {
+  ensureAuthProfileStore,
+  ensureAuthProfileStoreSync,
+  resolveAuthProfileOrder,
+} from "./auth-profiles.js";
 
 const AWS_BEARER_ENV = "AWS_BEARER_TOKEN_BEDROCK";
 const AWS_ACCESS_KEY_ENV = "AWS_ACCESS_KEY_ID";
@@ -141,7 +146,7 @@ export async function resolveApiKeyForProvider(params: {
   agentDir?: string;
 }): Promise<ResolvedProviderAuth> {
   const { provider, cfg, profileId, preferredProfile } = params;
-  const store = params.store ?? ensureAuthProfileStore(params.agentDir);
+  const store = params.store ?? (await ensureAuthProfileStore(params.agentDir));
 
   if (profileId) {
     const resolved = await resolveApiKeyForProfile({
@@ -338,7 +343,7 @@ export function resolveModelAuthMode(
     return "aws-sdk";
   }
 
-  const authStore = store ?? ensureAuthProfileStore();
+  const authStore = store ?? ensureAuthProfileStoreSync();
   const profiles = listProfilesForProvider(authStore, resolved);
   if (profiles.length > 0) {
     const modes = new Set(

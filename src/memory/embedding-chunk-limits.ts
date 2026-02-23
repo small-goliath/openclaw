@@ -3,10 +3,10 @@ import { estimateUtf8Bytes, splitTextToUtf8ByteLimit } from "./embedding-input-l
 import { resolveEmbeddingMaxInputTokens } from "./embedding-model-limits.js";
 import { hashText, type MemoryChunk } from "./internal.js";
 
-export function enforceEmbeddingMaxInputTokens(
+export async function enforceEmbeddingMaxInputTokens(
   provider: EmbeddingProvider,
   chunks: MemoryChunk[],
-): MemoryChunk[] {
+): Promise<MemoryChunk[]> {
   const maxInputTokens = resolveEmbeddingMaxInputTokens(provider);
   const out: MemoryChunk[] = [];
 
@@ -21,7 +21,7 @@ export function enforceEmbeddingMaxInputTokens(
         startLine: chunk.startLine,
         endLine: chunk.endLine,
         text,
-        hash: hashText(text),
+        hash: await hashText(text),
       });
     }
   }

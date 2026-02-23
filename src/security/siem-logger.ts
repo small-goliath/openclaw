@@ -62,7 +62,7 @@ interface OutputAdapter {
  * Splunk HEC, Datadog HTTP, ELK 등 지원
  */
 class HttpOutputAdapter implements OutputAdapter {
-  private config: HttpSiemConfig;
+  readonly config: HttpSiemConfig;
   private url: URL;
 
   constructor(config: HttpSiemConfig) {
@@ -193,7 +193,7 @@ class HttpOutputAdapter implements OutputAdapter {
  * UDP/TCP syslog 지원
  */
 class SyslogOutputAdapter implements OutputAdapter {
-  private config: SyslogSiemConfig;
+  readonly config: SyslogSiemConfig;
   private socket: Socket | TcpSocket | TLSSocket | null = null;
   private isTcp: boolean;
 
@@ -305,7 +305,7 @@ class SyslogOutputAdapter implements OutputAdapter {
  * 로컬 파일 로깅 (개발/테스트용)
  */
 class FileOutputAdapter implements OutputAdapter {
-  private config: FileSiemConfig;
+  readonly config: FileSiemConfig;
   private writeStream: WriteStream | null = null;
   private currentSize = 0;
 

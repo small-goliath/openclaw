@@ -44,7 +44,7 @@ export async function ensurePiAuthJsonFromAuthProfiles(agentDir: string): Promis
   wrote: boolean;
   authPath: string;
 }> {
-  const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
+  const store = await ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
   const codexProfiles = listProfilesForProvider(store, "openai-codex");
   if (codexProfiles.length === 0) {
     return { wrote: false, authPath: path.join(agentDir, "auth.json") };

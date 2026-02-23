@@ -153,8 +153,9 @@ export class CryptoWorkerPool {
       });
 
       worker.on("error", (error) => {
-        log.error(`Worker ${id} error`, { error: error.message });
-        this.handleWorkerError(wrapper, error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        log.error(`Worker ${id} error`, { error: errorMessage });
+        this.handleWorkerError(wrapper, error instanceof Error ? error : new Error(errorMessage));
       });
 
       worker.on("exit", (code) => {

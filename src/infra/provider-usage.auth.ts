@@ -34,7 +34,7 @@ function parseGoogleToken(apiKey: string): { token: string } | null {
   return null;
 }
 
-function resolveZaiApiKey(): string | undefined {
+async function resolveZaiApiKey(): Promise<string | undefined> {
   const envDirect =
     normalizeSecretInput(process.env.ZAI_API_KEY) || normalizeSecretInput(process.env.Z_AI_API_KEY);
   if (envDirect) {
@@ -52,7 +52,7 @@ function resolveZaiApiKey(): string | undefined {
     return key;
   }
 
-  const store = ensureAuthProfileStore();
+  const store = await ensureAuthProfileStore();
   const apiProfile = [
     ...listProfilesForProvider(store, "zai"),
     ...listProfilesForProvider(store, "z-ai"),
@@ -79,7 +79,7 @@ function resolveZaiApiKey(): string | undefined {
   }
 }
 
-function resolveMinimaxApiKey(): string | undefined {
+async function resolveMinimaxApiKey(): Promise<string | undefined> {
   const envDirect =
     normalizeSecretInput(process.env.MINIMAX_CODE_PLAN_KEY) ||
     normalizeSecretInput(process.env.MINIMAX_API_KEY);
@@ -98,7 +98,7 @@ function resolveMinimaxApiKey(): string | undefined {
     return key;
   }
 
-  const store = ensureAuthProfileStore();
+  const store = await ensureAuthProfileStore();
   const apiProfile = listProfilesForProvider(store, "minimax").find((id) => {
     const cred = store.profiles[id];
     return cred?.type === "api_key" || cred?.type === "token";
@@ -116,7 +116,7 @@ function resolveMinimaxApiKey(): string | undefined {
   return undefined;
 }
 
-function resolveXiaomiApiKey(): string | undefined {
+async function resolveXiaomiApiKey(): Promise<string | undefined> {
   const envDirect = normalizeSecretInput(process.env.XIAOMI_API_KEY);
   if (envDirect) {
     return envDirect;
@@ -133,7 +133,7 @@ function resolveXiaomiApiKey(): string | undefined {
     return key;
   }
 
-  const store = ensureAuthProfileStore();
+  const store = await ensureAuthProfileStore();
   const apiProfile = listProfilesForProvider(store, "xiaomi").find((id) => {
     const cred = store.profiles[id];
     return cred?.type === "api_key" || cred?.type === "token";
@@ -156,7 +156,7 @@ async function resolveOAuthToken(params: {
   agentDir?: string;
 }): Promise<ProviderAuth | null> {
   const cfg = loadConfig();
-  const store = ensureAuthProfileStore(params.agentDir, {
+  const store = await ensureAuthProfileStore(params.agentDir, {
     allowKeychainPrompt: false,
   });
   const order = resolveAuthProfileOrder({
@@ -211,8 +211,8 @@ async function resolveOAuthToken(params: {
   return null;
 }
 
-function resolveOAuthProviders(agentDir?: string): UsageProviderId[] {
-  const store = ensureAuthProfileStore(agentDir, {
+async function resolveOAuthProviders(agentDir?: string): Promise<UsageProviderId[]> {
+  const store = await ensureAuthProfileStore(agentDir, {
     allowKeychainPrompt: false,
   });
   const cfg = loadConfig();
@@ -250,26 +250,26 @@ export async function resolveProviderAuths(params: {
     return params.auth;
   }
 
-  const oauthProviders = resolveOAuthProviders(params.agentDir);
+  const oauthProviders = await resolveOAuthProviders(params.agentDir);
   const auths: ProviderAuth[] = [];
 
   for (const provider of params.providers) {
     if (provider === "zai") {
-      const apiKey = resolveZaiApiKey();
+      const apiKey = await resolveZaiApiKey();
       if (apiKey) {
         auths.push({ provider, token: apiKey });
       }
       continue;
     }
     if (provider === "minimax") {
-      const apiKey = resolveMinimaxApiKey();
+      const apiKey = await resolveMinimaxApiKey();
       if (apiKey) {
         auths.push({ provider, token: apiKey });
       }
       continue;
     }
     if (provider === "xiaomi") {
-      const apiKey = resolveXiaomiApiKey();
+      const apiKey = await resolveXiaomiApiKey();
       if (apiKey) {
         auths.push({ provider, token: apiKey });
       }

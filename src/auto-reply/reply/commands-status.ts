@@ -10,7 +10,7 @@ import {
   resolveSessionAgentId,
 } from "../../agents/agent-scope.js";
 import {
-  ensureAuthProfileStore,
+  ensureAuthProfileStoreSync,
   resolveAuthProfileDisplayLabel,
   resolveAuthProfileOrder,
 } from "../../agents/auth-profiles.js";
@@ -55,7 +55,7 @@ function resolveModelAuthLabel(
   }
 
   const providerKey = normalizeProviderId(resolved);
-  const store = ensureAuthProfileStore(agentDir, {
+  const store = ensureAuthProfileStoreSync(agentDir, {
     allowKeychainPrompt: false,
   });
   const profileOverride = sessionEntry?.authProfileOverride?.trim();

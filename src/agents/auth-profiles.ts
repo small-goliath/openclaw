@@ -17,6 +17,7 @@ export {
 } from "./auth-profiles/repair.js";
 export {
   ensureAuthProfileStore,
+  ensureAuthProfileStoreSync,
   loadAuthProfileStore,
   saveAuthProfileStore,
 } from "./auth-profiles/store.js";

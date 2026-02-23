@@ -45,11 +45,11 @@ export async function setAuthProfileOrder(params: {
   });
 }
 
-export function upsertAuthProfile(params: {
+export async function upsertAuthProfile(params: {
   profileId: string;
   credential: AuthProfileCredential;
   agentDir?: string;
-}): void {
+}): Promise<void> {
   const credential =
     params.credential.type === "api_key"
       ? {
@@ -61,9 +61,9 @@ export function upsertAuthProfile(params: {
       : params.credential.type === "token"
         ? { ...params.credential, token: normalizeSecretInput(params.credential.token) }
         : params.credential;
-  const store = ensureAuthProfileStore(params.agentDir);
+  const store = await ensureAuthProfileStore(params.agentDir);
   store.profiles[params.profileId] = credential;
-  saveAuthProfileStore(store, params.agentDir);
+  await saveAuthProfileStore(store, params.agentDir);
 }
 
 export async function upsertAuthProfileWithLock(params: {

@@ -4,7 +4,7 @@ import {
   DEFAULT_COPILOT_API_BASE_URL,
   resolveCopilotApiToken,
 } from "../providers/github-copilot-token.js";
-import { ensureAuthProfileStore, listProfilesForProvider } from "./auth-profiles.js";
+import { ensureAuthProfileStoreSync, listProfilesForProvider } from "./auth-profiles.js";
 import { discoverBedrockModels } from "./bedrock-discovery.js";
 import {
   buildCloudflareAiGatewayModelDefinition,
@@ -274,7 +274,7 @@ function resolveAwsSdkApiKeyVarName(): string {
 
 function resolveApiKeyFromProfiles(params: {
   provider: string;
-  store: ReturnType<typeof ensureAuthProfileStore>;
+  store: ReturnType<typeof ensureAuthProfileStoreSync>;
 }): string | undefined {
   const ids = listProfilesForProvider(params.store, params.provider);
   for (const id of ids) {
@@ -323,7 +323,7 @@ export function normalizeProviders(params: {
   if (!providers) {
     return providers;
   }
-  const authStore = ensureAuthProfileStore(params.agentDir, {
+  const authStore = ensureAuthProfileStoreSync(params.agentDir, {
     allowKeychainPrompt: false,
   });
   let mutated = false;
@@ -661,7 +661,7 @@ export async function resolveImplicitProviders(params: {
   explicitProviders?: Record<string, ProviderConfig> | null;
 }): Promise<ModelsConfig["providers"]> {
   const providers: Record<string, ProviderConfig> = {};
-  const authStore = ensureAuthProfileStore(params.agentDir, {
+  const authStore = ensureAuthProfileStoreSync(params.agentDir, {
     allowKeychainPrompt: false,
   });
 
@@ -815,7 +815,7 @@ export async function resolveImplicitCopilotProvider(params: {
   env?: NodeJS.ProcessEnv;
 }): Promise<ProviderConfig | null> {
   const env = params.env ?? process.env;
-  const authStore = ensureAuthProfileStore(params.agentDir, {
+  const authStore = ensureAuthProfileStoreSync(params.agentDir, {
     allowKeychainPrompt: false,
   });
   const hasProfile = listProfilesForProvider(authStore, "github-copilot").length > 0;

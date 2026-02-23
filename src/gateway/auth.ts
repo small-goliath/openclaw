@@ -248,7 +248,7 @@ export async function authorizeGatewayConnect(params: {
     params.clientIp ?? resolveRequestClientIp(req, trustedProxies) ?? req?.socket?.remoteAddress;
   const rateLimitScope = params.rateLimitScope ?? AUTH_RATE_LIMIT_SCOPE_SHARED_SECRET;
   if (limiter) {
-    const rlCheck: RateLimitCheckResult = limiter.check(ip, rateLimitScope);
+    const rlCheck = await limiter.check(ip, rateLimitScope);
     if (!rlCheck.allowed) {
       return {
         ok: false,

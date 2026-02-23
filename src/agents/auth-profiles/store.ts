@@ -4,25 +4,20 @@ import type { AuthProfileCredential, AuthProfileStore, ProfileUsageStats } from 
 import { resolveOAuthPath } from "../../config/paths.js";
 import { withFileLock } from "../../infra/file-lock.js";
 import { loadJsonFile, saveJsonFile } from "../../infra/json-file.js";
-import { AUTH_STORE_LOCK_OPTIONS, AUTH_STORE_VERSION, log } from "./constants.js";
-import { syncExternalCliCredentials } from "./external-cli-sync.js";
-import { ensureAuthStoreFile, resolveAuthStorePath, resolveLegacyAuthStorePath } from "./paths.js";
 import {
   getEncryptionService,
   getOrInitEncryption,
   createEncryptionConfigFromEnv,
   type EncryptedData,
 } from "../../security/encryption.js";
+import { AUTH_STORE_LOCK_OPTIONS, AUTH_STORE_VERSION, log } from "./constants.js";
+import { syncExternalCliCredentials } from "./external-cli-sync.js";
+import { ensureAuthStoreFile, resolveAuthStorePath, resolveLegacyAuthStorePath } from "./paths.js";
 
 /**
  * Fields in AuthProfileCredential that contain sensitive credential data
  */
-const SENSITIVE_CREDENTIAL_FIELDS: Array<keyof AuthProfileCredential> = [
-  "key",
-  "token",
-  "access",
-  "refresh",
-];
+const SENSITIVE_CREDENTIAL_FIELDS = ["key", "token", "access", "refresh"] as const;
 
 /**
  * Initialize encryption service for auth profiles
@@ -42,16 +37,17 @@ function ensureEncryptionService() {
 /**
  * Encrypt sensitive fields in a credential
  */
-async function encryptCredential(
-  cred: AuthProfileCredential
-): Promise<AuthProfileCredential> {
+async function encryptCredential(cred: AuthProfileCredential): Promise<AuthProfileCredential> {
   const service = ensureEncryptionService();
   if (!service.isEnabled()) {
     return cred;
   }
 
   try {
-    return await service.encryptFields(cred, SENSITIVE_CREDENTIAL_FIELDS);
+    return await service.encryptFields(
+      cred,
+      SENSITIVE_CREDENTIAL_FIELDS as unknown as Array<keyof AuthProfileCredential>,
+    );
   } catch (err) {
     log.warn("failed to encrypt credential fields", { provider: cred.provider, err });
     return cred;
@@ -61,13 +57,14 @@ async function encryptCredential(
 /**
  * Decrypt sensitive fields in a credential
  */
-async function decryptCredential(
-  cred: AuthProfileCredential
-): Promise<AuthProfileCredential> {
+async function decryptCredential(cred: AuthProfileCredential): Promise<AuthProfileCredential> {
   const service = ensureEncryptionService();
 
   try {
-    return await service.decryptFields(cred, SENSITIVE_CREDENTIAL_FIELDS);
+    return await service.decryptFields(
+      cred,
+      SENSITIVE_CREDENTIAL_FIELDS as unknown as Array<keyof AuthProfileCredential>,
+    );
   } catch (err) {
     log.warn("failed to decrypt credential fields", { provider: cred.provider, err });
     return cred;
@@ -498,7 +495,7 @@ export function ensureAuthProfileStoreSync(
 
 export async function saveAuthProfileStore(
   store: AuthProfileStore,
-  agentDir?: string
+  agentDir?: string,
 ): Promise<void> {
   const authPath = resolveAuthStorePath(agentDir);
 

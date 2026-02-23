@@ -6,7 +6,7 @@ import type { SandboxFsBridge } from "../sandbox/fs-bridge.js";
 import type { AnyAgentTool } from "./common.js";
 import { resolveUserPath } from "../../utils.js";
 import { loadWebMedia } from "../../web/media.js";
-import { ensureAuthProfileStore, listProfilesForProvider } from "../auth-profiles.js";
+import { ensureAuthProfileStoreSync, listProfilesForProvider } from "../auth-profiles.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
 import { minimaxUnderstandImage } from "../minimax-vlm.js";
 import { getApiKeyForModel, requireApiKey, resolveEnvApiKey } from "../model-auth.js";
@@ -62,7 +62,7 @@ function hasAuthForProvider(params: { provider: string; agentDir: string }): boo
   if (resolveEnvApiKey(params.provider)?.apiKey) {
     return true;
   }
-  const store = ensureAuthProfileStore(params.agentDir, {
+  const store = ensureAuthProfileStoreSync(params.agentDir, {
     allowKeychainPrompt: false,
   });
   return listProfilesForProvider(store, params.provider).length > 0;

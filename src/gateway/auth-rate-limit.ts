@@ -56,11 +56,14 @@ export interface RateLimitCheckResult {
 
 export interface AuthRateLimiter {
   /** Check whether `ip` is currently allowed to attempt authentication. */
-  check(ip: string | undefined, scope?: string): RateLimitCheckResult;
+  check(
+    ip: string | undefined,
+    scope?: string,
+  ): RateLimitCheckResult | Promise<RateLimitCheckResult>;
   /** Record a failed authentication attempt for `ip`. */
-  recordFailure(ip: string | undefined, scope?: string): void;
+  recordFailure(ip: string | undefined, scope?: string): void | Promise<void>;
   /** Reset the rate-limit state for `ip` (e.g. after a successful login). */
-  reset(ip: string | undefined, scope?: string): void;
+  reset(ip: string | undefined, scope?: string): void | Promise<void>;
   /** Return the current number of tracked IPs (useful for diagnostics). */
   size(): number;
   /** Remove expired entries and release memory. */

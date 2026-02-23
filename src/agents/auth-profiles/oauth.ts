@@ -41,7 +41,7 @@ async function refreshOAuthTokenWithLock(params: {
   ensureAuthStoreFile(authPath);
 
   return await withFileLock(authPath, AUTH_STORE_LOCK_OPTIONS, async () => {
-    const store = ensureAuthProfileStore(params.agentDir);
+    const store = await ensureAuthProfileStore(params.agentDir);
     const cred = store.profiles[params.profileId];
     if (!cred || cred.type !== "oauth") {
       return null;
@@ -86,7 +86,7 @@ async function refreshOAuthTokenWithLock(params: {
       ...result.newCredentials,
       type: "oauth",
     };
-    saveAuthProfileStore(store, params.agentDir);
+    await saveAuthProfileStore(store, params.agentDir);
 
     return result;
   });
@@ -199,7 +199,7 @@ export async function resolveApiKeyForProfile(params: {
       email: cred.email,
     };
   } catch (error) {
-    const refreshedStore = ensureAuthProfileStore(params.agentDir);
+    const refreshedStore = await ensureAuthProfileStore(params.agentDir);
     const refreshed = refreshedStore.profiles[profileId];
     if (refreshed?.type === "oauth" && Date.now() < refreshed.expires) {
       return {
@@ -233,12 +233,12 @@ export async function resolveApiKeyForProfile(params: {
     // Fallback: if this is a secondary agent, try using the main agent's credentials
     if (params.agentDir) {
       try {
-        const mainStore = ensureAuthProfileStore(undefined); // main agent (no agentDir)
+        const mainStore = await ensureAuthProfileStore(undefined); // main agent (no agentDir)
         const mainCred = mainStore.profiles[profileId];
         if (mainCred?.type === "oauth" && Date.now() < mainCred.expires) {
           // Main agent has fresh credentials - copy them to this agent and use them
           refreshedStore.profiles[profileId] = { ...mainCred };
-          saveAuthProfileStore(refreshedStore, params.agentDir);
+          await saveAuthProfileStore(refreshedStore, params.agentDir);
           log.info("inherited fresh OAuth credentials from main agent", {
             profileId,
             agentDir: params.agentDir,

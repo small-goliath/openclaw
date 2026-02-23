@@ -25,7 +25,7 @@ import {
 import { applyModelOverrideToSessionEntry } from "../../sessions/model-overrides.js";
 import { resolveAgentDir } from "../agent-scope.js";
 import {
-  ensureAuthProfileStore,
+  ensureAuthProfileStoreSync,
   resolveAuthProfileDisplayLabel,
   resolveAuthProfileOrder,
 } from "../auth-profiles.js";
@@ -76,7 +76,7 @@ function resolveModelAuthLabel(params: {
   }
 
   const providerKey = normalizeProviderId(resolvedProvider);
-  const store = ensureAuthProfileStore(params.agentDir, {
+  const store = ensureAuthProfileStoreSync(params.agentDir, {
     allowKeychainPrompt: false,
   });
   const profileOverride = params.sessionEntry?.authProfileOverride?.trim();

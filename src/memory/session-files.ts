@@ -120,7 +120,7 @@ export async function buildSessionEntry(absPath: string): Promise<SessionFileEnt
       absPath,
       mtimeMs: stat.mtimeMs,
       size: stat.size,
-      hash: hashText(content + "\n" + lineMap.join(",")),
+      hash: await hashText(content + "\n" + lineMap.join(",")),
       content,
       lineMap,
     };
