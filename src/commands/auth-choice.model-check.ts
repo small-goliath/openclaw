@@ -55,7 +55,7 @@ export async function warnIfModelConfigLooksOff(
     }
   }
 
-  const store = ensureAuthProfileStore(options?.agentDir);
+  const store = await ensureAuthProfileStore(options?.agentDir);
   const hasProfile = listProfilesForProvider(store, ref.provider).length > 0;
   const envKey = resolveEnvApiKey(ref.provider);
   const customKey = getCustomProviderApiKey(config, ref.provider);

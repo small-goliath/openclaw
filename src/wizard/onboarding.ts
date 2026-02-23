@@ -367,7 +367,7 @@ export async function runOnboardingWizard(
     },
   };
 
-  const authStore = ensureAuthProfileStore(undefined, {
+  const authStore = await ensureAuthProfileStore(undefined, {
     allowKeychainPrompt: false,
   });
   const authChoiceFromPrompt = opts.authChoice === undefined;

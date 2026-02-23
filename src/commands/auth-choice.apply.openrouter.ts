@@ -30,7 +30,7 @@ export async function applyAuthChoiceOpenRouter(
     );
   };
 
-  const store = ensureAuthProfileStore(params.agentDir, { allowKeychainPrompt: false });
+  const store = await ensureAuthProfileStore(params.agentDir, { allowKeychainPrompt: false });
   const profileOrder = resolveAuthProfileOrder({
     cfg: nextConfig,
     store,

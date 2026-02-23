@@ -82,7 +82,7 @@ export async function upsertAuthProfileWithLock(params: {
 
 export function listProfilesForProvider(store: AuthProfileStore, provider: string): string[] {
   const providerKey = normalizeProviderId(provider);
-  return Object.entries(store.profiles)
+  return Object.entries(store.profiles ?? {})
     .filter(([, cred]) => normalizeProviderId(cred.provider) === providerKey)
     .map(([id]) => id);
 }

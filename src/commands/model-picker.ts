@@ -4,6 +4,7 @@ import {
   ensureAuthProfileStore,
   listProfilesForProvider,
   upsertAuthProfileWithLock,
+  type AuthProfileStore,
 } from "../agents/auth-profiles.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
 import { getCustomProviderApiKey, resolveEnvApiKey } from "../agents/model-auth.js";
@@ -52,11 +53,7 @@ type PromptDefaultModelParams = {
 type PromptDefaultModelResult = { model?: string; config?: OpenClawConfig };
 type PromptModelAllowlistResult = { models?: string[] };
 
-function hasAuthForProvider(
-  provider: string,
-  cfg: OpenClawConfig,
-  store: ReturnType<typeof ensureAuthProfileStore>,
-) {
+function hasAuthForProvider(provider: string, cfg: OpenClawConfig, store: AuthProfileStore) {
   if (listProfilesForProvider(store, provider).length > 0) {
     return true;
   }
@@ -201,7 +198,7 @@ export async function promptDefaultModel(
   }
 
   const agentDir = params.agentDir;
-  const authStore = ensureAuthProfileStore(agentDir, {
+  const authStore = await ensureAuthProfileStore(agentDir, {
     allowKeychainPrompt: false,
   });
   const authCache = new Map<string, boolean>();
@@ -438,7 +435,7 @@ export async function promptModelAllowlist(params: {
     cfg,
     defaultProvider: DEFAULT_PROVIDER,
   });
-  const authStore = ensureAuthProfileStore(params.agentDir, {
+  const authStore = await ensureAuthProfileStore(params.agentDir, {
     allowKeychainPrompt: false,
   });
   const authCache = new Map<string, boolean>();

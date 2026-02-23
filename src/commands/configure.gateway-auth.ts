@@ -63,7 +63,7 @@ export async function promptAuthConfig(
 ): Promise<OpenClawConfig> {
   const authChoice = await promptAuthChoiceGrouped({
     prompter,
-    store: ensureAuthProfileStore(undefined, {
+    store: await ensureAuthProfileStore(undefined, {
       allowKeychainPrompt: false,
     }),
     includeSkip: true,
