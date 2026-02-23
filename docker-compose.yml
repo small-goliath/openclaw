@@ -44,3 +44,25 @@ services:
     tty: true
     init: true
     entrypoint: ["node", "dist/index.js"]
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama:/root/.ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0
+    restart: unless-stopped
+    # GPU support (optional) - uncomment for NVIDIA GPU
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  ollama:
