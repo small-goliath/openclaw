@@ -295,27 +295,66 @@ export class QmdMemoryManager implements MemorySearchManager {
     }
     const parsed = parseQmdQueryJson(stdout, stderr);
     const results: MemorySearchResult[] = [];
-    for (const entry of parsed) {
-      const doc = await this.resolveDocLocation(entry.docid);
-      if (!doc) {
-        continue;
+
+    // Process documents in parallel batches for improved performance
+    const batchSize = 10;
+    const startTime = performance.now();
+    let resolvedCount = 0;
+    let failedCount = 0;
+
+    for (let i = 0; i < parsed.length; i += batchSize) {
+      const batch = parsed.slice(i, i + batchSize);
+      const batchResults = await Promise.allSettled(
+        batch.map(async (entry) => {
+          const doc = await this.resolveDocLocation(entry.docid);
+          if (!doc) {
+            return null;
+          }
+          return { entry, doc };
+        })
+      );
+
+      // Process batch results with error handling for partial success
+      for (let j = 0; j < batchResults.length; j++) {
+        const result = batchResults[j];
+        const entry = batch[j];
+
+        if (result.status === "fulfilled" && result.value) {
+          resolvedCount++;
+          const { doc } = result.value;
+          const snippet = entry.snippet?.slice(0, this.qmd.limits.maxSnippetChars) ?? "";
+          const lines = this.extractSnippetLines(snippet);
+          const score = typeof entry.score === "number" ? entry.score : 0;
+          const minScore = opts?.minScore ?? 0;
+          if (score < minScore) {
+            continue;
+          }
+          results.push({
+            path: doc.rel,
+            startLine: lines.startLine,
+            endLine: lines.endLine,
+            score,
+            snippet,
+            source: doc.source,
+          });
+        } else {
+          failedCount++;
+          const error = result.status === "rejected" ? result.reason : "Document not found";
+          // Propagate SQLITE_BUSY errors so callers can fallback
+          if (this.isSqliteBusyError(error)) {
+            throw this.createQmdBusyError(error);
+          }
+          log.warn(`Failed to resolve document ${entry.docid}: ${String(error)}`);
+        }
       }
-      const snippet = entry.snippet?.slice(0, this.qmd.limits.maxSnippetChars) ?? "";
-      const lines = this.extractSnippetLines(snippet);
-      const score = typeof entry.score === "number" ? entry.score : 0;
-      const minScore = opts?.minScore ?? 0;
-      if (score < minScore) {
-        continue;
-      }
-      results.push({
-        path: doc.rel,
-        startLine: lines.startLine,
-        endLine: lines.endLine,
-        score,
-        snippet,
-        source: doc.source,
-      });
     }
+
+    // Performance monitoring
+    const duration = performance.now() - startTime;
+    log.debug(
+      `QMD document resolution completed: ${resolvedCount} resolved, ${failedCount} failed, ${parsed.length} total in ${duration.toFixed(2)}ms`
+    );
+
     return this.clampResultsByInjectedChars(results.slice(0, limit));
   }
 

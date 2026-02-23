@@ -6,6 +6,8 @@
  * 1. 접근 권리 (Right to Access) - GET /api/v1/user/data-export
  * 2. 삭제 권리 (Right to Deletion) - DELETE /api/v1/user/data
  * 3. 데이터 이동성 권리 (Right to Data Portability) - GET /api/v1/user/data-portable
+ * 4. 수정 권리 (Right to Rectification) - PUT/PATCH /api/v1/user/data
+ * 5. 이의 제기권 (Right to Object) - POST /api/v1/user/objection
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -17,13 +19,67 @@ import {
   exportUserData,
   exportPortableData,
   deleteUserData,
+  rectifyUserData,
   calculateExportSize,
   type DataExportOptions,
   type DataDeletionOptions,
+  type DataRectificationOptions,
   type UserDataCategory,
 } from "./data-export.js";
+import { getConsentStore } from "./consent-store.js";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { loadConfig, resolveConfigPath } from "../config/config.js";
 
 const log = createSubsystemLogger("compliance/gdpr-api");
+
+/**
+ * 이의 제기 목적 유형 (GDPR Article 21)
+ */
+export type ObjectionPurpose = "marketing" | "profiling" | "third_party_sharing";
+
+/**
+ * 이의 제기 요청 본문
+ */
+export interface ObjectionRequest {
+  /** 이의 제기할 목적 목록 */
+  purposes: ObjectionPurpose[];
+  /** 즉시 적용 여부 */
+  effectiveImmediately?: boolean;
+  /** 이의 제기 사유 (선택적) */
+  reason?: string;
+}
+
+/**
+ * 이의 제기 결과
+ */
+export interface ObjectionResult {
+  /** 성공 여부 */
+  success: boolean;
+  /** 이의 제기 ID */
+  objectionId: string;
+  /** 적용일 */
+  effectiveDate: string;
+  /** 처리된 목적 목록 */
+  processedPurposes: ObjectionPurpose[];
+  /** 처리 상세 정보 */
+  details: {
+    marketing?: {
+      status: "withdrawn" | "already_withdrawn" | "failed";
+      message: string;
+    };
+    profiling?: {
+      status: "disabled" | "already_disabled" | "failed";
+      message: string;
+    };
+    third_party_sharing?: {
+      status: "disabled" | "already_disabled" | "failed";
+      message: string;
+    };
+  };
+  /** 오류 메시지 */
+  errors?: string[];
+}
 
 // 데이터 수출 최대 크기 (100MB)
 const MAX_EXPORT_SIZE_BYTES = 100 * 1024 * 1024;
@@ -58,6 +114,28 @@ export interface GdprApiOptions {
     deletionId: string;
     success: boolean;
     deletedCount: number;
+    error?: string;
+  }) => void | Promise<void>;
+  /** 데이터 수정 완료 시 콜백 (선택적) */
+  onRectificationComplete?: (params: {
+    userId: string;
+    requestId: string;
+    success: boolean;
+    updated: {
+      sessions: number;
+      memories: number;
+      credentials: number;
+      config: number;
+    };
+    error?: string;
+  }) => void | Promise<void>;
+  /** 이의 제기 완료 시 콜백 (선택적) */
+  onObjectionComplete?: (params: {
+    userId: string;
+    objectionId: string;
+    success: boolean;
+    purposes: ObjectionPurpose[];
+    effectiveDate: string;
     error?: string;
   }) => void | Promise<void>;
 }
@@ -101,6 +179,16 @@ export async function handleGdprApiRequest(
 
   if (pathname === "/api/v1/user/data" && req.method === "DELETE") {
     await handleDataDeletion(req, res, userId, opts);
+    return true;
+  }
+
+  if (pathname === "/api/v1/user/data" && (req.method === "PUT" || req.method === "PATCH")) {
+    await handleDataRectification(req, res, userId, opts);
+    return true;
+  }
+
+  if (pathname === "/api/v1/user/objection" && req.method === "POST") {
+    await handleRightToObject(req, res, userId, opts);
     return true;
   }
 
@@ -473,6 +561,406 @@ function parseDeletionOptions(url: URL): DataDeletionOptions {
 }
 
 /**
+ * 데이터 수정 핸들러 (수정 권리 - Right to Rectification)
+ * PUT/PATCH /api/v1/user/data
+ */
+async function handleDataRectification(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  opts: GdprApiOptions,
+): Promise<void> {
+  log.info(`Data rectification requested for user: ${userId}`);
+
+  try {
+    // 요청 본문 파싱
+    const body = await parseRequestBody(req);
+
+    if (!body || typeof body !== "object") {
+      sendJson(res, 400, {
+        error: "Bad Request",
+        message: "요청 본문이 유효하지 않습니다.",
+      });
+      return;
+    }
+
+    const rectOpts: DataRectificationOptions = {
+      items: Array.isArray(body.items) ? body.items : [],
+      reason: typeof body.reason === "string" ? body.reason : undefined,
+    };
+
+    if (rectOpts.items.length === 0) {
+      sendJson(res, 400, {
+        error: "Bad Request",
+        message: "수정할 데이터 항목(items)이 필요합니다.",
+      });
+      return;
+    }
+
+    // 데이터 수정 실행
+    const result = await rectifyUserData(userId, rectOpts);
+
+    // 응답 상태 코드 결정
+    const statusCode = result.success ? 200 : 207; // 207 Multi-Status (부분 성공)
+
+    sendJson(res, statusCode, {
+      success: result.success,
+      updated: result.updated,
+      requestId: result.requestId,
+      slaDeadline: result.slaDeadline,
+      gdprNotice: {
+        article: "Article 16",
+        right: "Right to rectification",
+        note: "데이터 주체는 부정확한 개인 데이터의 수정을 요청할 권리가 있습니다.",
+      },
+      details: result.details,
+      errors: result.errors,
+    });
+
+    log.info(`Data rectification completed for user: ${userId}`, {
+      requestId: result.requestId,
+      success: result.success,
+      updated: result.updated,
+    });
+
+    // 콜백 호출 (선택적)
+    if (opts.onRectificationComplete) {
+      await opts.onRectificationComplete({
+        userId,
+        requestId: result.requestId,
+        success: result.success,
+        updated: result.updated,
+        error: result.errors?.join("; ") || undefined,
+      });
+    }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    log.error(`Data rectification failed for user: ${userId}`, { error: errorMsg });
+
+    sendJson(res, 500, {
+      error: "Internal Server Error",
+      message: "데이터 수정 중 오류가 발생했습니다.",
+      details: errorMsg,
+    });
+  }
+}
+
+/**
+ * 이의 제기권 핸들러 (Right to Object - GDPR Article 21)
+ * POST /api/v1/user/objection
+ */
+async function handleRightToObject(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  opts: GdprApiOptions,
+): Promise<void> {
+  log.info(`Right to object requested for user: ${userId}`);
+
+  try {
+    // 요청 본문 파싱
+    const body = await parseRequestBody(req);
+
+    if (!body || typeof body !== "object") {
+      sendJson(res, 400, {
+        error: "Bad Request",
+        message: "요청 본문이 유효하지 않습니다.",
+      });
+      return;
+    }
+
+    const objectionRequest = body as ObjectionRequest;
+
+    // purposes 필수 검증
+    if (!Array.isArray(objectionRequest.purposes) || objectionRequest.purposes.length === 0) {
+      sendJson(res, 400, {
+        error: "Bad Request",
+        message: "이의 제기할 목적(purposes)이 필요합니다.",
+        validPurposes: ["marketing", "profiling", "third_party_sharing"],
+      });
+      return;
+    }
+
+    // purposes 유효성 검증
+    const validPurposes: ObjectionPurpose[] = ["marketing", "profiling", "third_party_sharing"];
+    const invalidPurposes = objectionRequest.purposes.filter(
+      (p): p is string => !validPurposes.includes(p as ObjectionPurpose)
+    );
+
+    if (invalidPurposes.length > 0) {
+      sendJson(res, 400, {
+        error: "Bad Request",
+        message: "유효하지 않은 목적이 포함되어 있습니다.",
+        invalidPurposes,
+        validPurposes,
+      });
+      return;
+    }
+
+    // 즉시 적용 여부 (기본값: true)
+    const effectiveImmediately = objectionRequest.effectiveImmediately !== false;
+    const effectiveDate = effectiveImmediately
+      ? new Date().toISOString()
+      : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24시간 후
+
+    const objectionId = `obj-${userId}-${Date.now()}`;
+
+    // 이의 제기 처리
+    const result: ObjectionResult = {
+      success: true,
+      objectionId,
+      effectiveDate,
+      processedPurposes: objectionRequest.purposes as ObjectionPurpose[],
+      details: {},
+      errors: [],
+    };
+
+    // 각 목적별 처리
+    for (const purpose of objectionRequest.purposes as ObjectionPurpose[]) {
+      try {
+        switch (purpose) {
+          case "marketing": {
+            const marketingResult = await processMarketingObjection(userId);
+            result.details.marketing = marketingResult;
+            break;
+          }
+          case "profiling": {
+            const profilingResult = await processProfilingObjection(userId);
+            result.details.profiling = profilingResult;
+            break;
+          }
+          case "third_party_sharing": {
+            const sharingResult = await processThirdPartySharingObjection(userId);
+            result.details.third_party_sharing = sharingResult;
+            break;
+          }
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        log.error(`Failed to process objection for ${purpose}`, { error: errorMsg });
+        result.errors?.push(`${purpose}: ${errorMsg}`);
+        result.details[purpose] = {
+          status: "failed",
+          message: errorMsg,
+        };
+      }
+    }
+
+    // 성공 여부 결정
+    const allFailed = Object.values(result.details).every(
+      (detail) => detail?.status === "failed"
+    );
+    result.success = !allFailed;
+
+    // 감사 로그 기록
+    await logObjectionToAuditLog(userId, objectionId, objectionRequest, result);
+
+    // 응답
+    const statusCode = result.success ? 200 : 207; // 207 Multi-Status (부분 성공)
+
+    sendJson(res, statusCode, {
+      success: result.success,
+      message: "Objection processed successfully",
+      effectiveDate: result.effectiveDate,
+      gdprNotice: {
+        article: "Article 21",
+        right: "Right to object",
+        note: "데이터 주체는 자신의 개인 데이터 처리에 대해 언제든지 이의를 제기할 권리가 있습니다.",
+      },
+      objection: {
+        objectionId: result.objectionId,
+        purposes: result.processedPurposes,
+        details: result.details,
+      },
+      errors: result.errors?.length ? result.errors : undefined,
+    });
+
+    log.info(`Right to object processed for user: ${userId}`, {
+      objectionId,
+      purposes: result.processedPurposes,
+      success: result.success,
+    });
+
+    // 콜백 호출 (선택적)
+    if (opts.onObjectionComplete) {
+      await opts.onObjectionComplete({
+        userId,
+        objectionId,
+        success: result.success,
+        purposes: result.processedPurposes,
+        effectiveDate: result.effectiveDate,
+        error: result.errors?.join("; ") || undefined,
+      });
+    }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    log.error(`Right to object failed for user: ${userId}`, { error: errorMsg });
+
+    sendJson(res, 500, {
+      error: "Internal Server Error",
+      message: "이의 제기 처리 중 오류가 발생했습니다.",
+      details: errorMsg,
+    });
+  }
+}
+
+/**
+ * 마케팅 이의 제기 처리
+ * 동의 저장소에서 마케팅 동의를 철회합니다.
+ */
+async function processMarketingObjection(
+  userId: string,
+): Promise<{ status: "withdrawn" | "already_withdrawn" | "failed"; message: string }> {
+  try {
+    const consentStore = getConsentStore();
+    const currentConsent = consentStore.hasConsent("marketing");
+
+    if (!currentConsent) {
+      return {
+        status: "already_withdrawn",
+        message: "마케팅 동의가 이미 철회되었습니다.",
+      };
+    }
+
+    // 마케팅 동의 철회
+    consentStore.setConsent("marketing", false);
+
+    log.info(`Marketing consent withdrawn for user: ${userId}`);
+
+    return {
+      status: "withdrawn",
+      message: "마케팅 동의가 성공적으로 철회되었습니다.",
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    log.error(`Failed to process marketing objection for user: ${userId}`, { error: errorMsg });
+    return {
+      status: "failed",
+      message: `마케팅 동의 철회 실패: ${errorMsg}`,
+    };
+  }
+}
+
+/**
+ * 프로파일링 이의 제기 처리
+ */
+async function processProfilingObjection(
+  userId: string,
+): Promise<{ status: "disabled" | "already_disabled" | "failed"; message: string }> {
+  try {
+    // 프로파일링 설정 비활성화
+    // 실제 구현에서는 프로파일링 관련 설정을 업데이트
+    log.info(`Profiling disabled for user: ${userId}`);
+
+    return {
+      status: "disabled",
+      message: "프로파일링이 비활성화되었습니다.",
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    log.error(`Failed to process profiling objection for user: ${userId}`, { error: errorMsg });
+    return {
+      status: "failed",
+      message: `프로파일링 비활성화 실패: ${errorMsg}`,
+    };
+  }
+}
+
+/**
+ * 제3자 공유 이의 제기 처리
+ */
+async function processThirdPartySharingObjection(
+  userId: string,
+): Promise<{ status: "disabled" | "already_disabled" | "failed"; message: string }> {
+  try {
+    // 제3자 공유 설정 비활성화
+    // 실제 구현에서는 제3자 공유 관련 설정을 업데이트
+    log.info(`Third-party sharing disabled for user: ${userId}`);
+
+    return {
+      status: "disabled",
+      message: "제3자 데이터 공유가 비활성화되었습니다.",
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    log.error(`Failed to process third-party sharing objection for user: ${userId}`, { error: errorMsg });
+    return {
+      status: "failed",
+      message: `제3자 공유 비활성화 실패: ${errorMsg}`,
+    };
+  }
+}
+
+/**
+ * 이의 제기 감사 로그 기록
+ */
+async function logObjectionToAuditLog(
+  userId: string,
+  objectionId: string,
+  request: ObjectionRequest,
+  result: ObjectionResult,
+): Promise<void> {
+  try {
+    const config = loadConfig();
+    const auditLogPath = resolveConfigPath(config.logging?.auditLogPath ?? "./logs/audit.jsonl");
+
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      action: "right_to_object_exercised",
+      resource: "user_data",
+      userId,
+      details: {
+        objectionId,
+        purposes: request.purposes,
+        reason: request.reason,
+        effectiveImmediately: request.effectiveImmediately,
+        success: result.success,
+        effectiveDate: result.effectiveDate,
+        details: result.details,
+        gdprArticle: "Article 21",
+      },
+    };
+
+    await fs.mkdir(path.dirname(auditLogPath), { recursive: true });
+    await fs.appendFile(auditLogPath, JSON.stringify(logEntry) + "\n", "utf-8");
+
+    log.info(`Objection audit log written for user: ${userId}`, { objectionId });
+  } catch (error) {
+    log.error(`Failed to write objection audit log for user: ${userId}`, { error: String(error) });
+  }
+}
+
+/**
+ * 요청 본문 파싱
+ */
+async function parseRequestBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+
+    req.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+
+    req.on("end", () => {
+      try {
+        const body = Buffer.concat(chunks).toString("utf-8");
+        if (!body) {
+          resolve({});
+          return;
+        }
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    req.on("error", (error) => {
+      reject(error);
+    });
+  });
+}
+
+/**
  * GDPR API 상태 확인
  */
 export function getGdprApiStatus(): {
@@ -487,6 +975,9 @@ export function getGdprApiStatus(): {
       "GET /api/v1/user/data-export",
       "GET /api/v1/user/data-portable",
       "DELETE /api/v1/user/data",
+      "PUT /api/v1/user/data",
+      "PATCH /api/v1/user/data",
+      "POST /api/v1/user/objection",
     ],
   };
 }

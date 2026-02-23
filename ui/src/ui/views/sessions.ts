@@ -3,6 +3,8 @@ import type { GatewaySessionRow, SessionsListResult } from "../types.ts";
 import { formatRelativeTimestamp } from "../format.ts";
 import { pathForTab } from "../navigation.ts";
 import { formatSessionTokens } from "../presenter.ts";
+import "../components/virtual-list.ts";
+import type { VirtualListItem } from "../components/virtual-list.ts";
 
 export type SessionsProps = {
   loading: boolean;
@@ -31,6 +33,11 @@ export type SessionsProps = {
   ) => void;
   onDelete: (key: string) => void;
 };
+
+/**
+ * Session row with virtual list item interface
+ */
+type SessionRowWithId = GatewaySessionRow & VirtualListItem;
 
 const THINK_LEVELS = ["", "off", "minimal", "low", "medium", "high", "xhigh"] as const;
 const BINARY_THINK_LEVELS = ["", "off", "on"] as const;
@@ -107,8 +114,41 @@ function resolveThinkLevelPatchValue(value: string, isBinary: boolean): string |
   return value;
 }
 
+/**
+ * Threshold for enabling virtual scrolling
+ * Lists smaller than this will render normally for better UX
+ */
+const VIRTUAL_SCROLL_THRESHOLD = 50;
+
+/**
+ * Default item height for session rows
+ */
+const SESSION_ITEM_HEIGHT = 56;
+
+/**
+ * Buffer size for smooth scrolling
+ */
+const SESSION_BUFFER_SIZE = 5;
+
+/**
+ * Convert session rows to virtual list items
+ */
+function adaptSessionsForVirtualList(
+  rows: GatewaySessionRow[],
+): SessionRowWithId[] {
+  return rows.map((row) => ({
+    ...row,
+    id: row.key,
+  }));
+}
+
 export function renderSessions(props: SessionsProps) {
   const rows = props.result?.sessions ?? [];
+  const useVirtualScroll = rows.length > VIRTUAL_SCROLL_THRESHOLD;
+  const virtualItems = useVirtualScroll
+    ? adaptSessionsForVirtualList(rows)
+    : [];
+
   return html`
     <section class="card">
       <div class="row" style="justify-content: space-between;">
@@ -192,6 +232,9 @@ export function renderSessions(props: SessionsProps) {
 
       <div class="muted" style="margin-top: 12px;">
         ${props.result ? `Store: ${props.result.path}` : ""}
+        ${useVirtualScroll
+          ? html` · <span class="virtual-scroll-badge">Virtual scroll enabled (${rows.length} items)</span>`
+          : nothing}
       </div>
 
       <div class="table" role="table" aria-label="Sessions list" style="margin-top: 16px;">
@@ -208,17 +251,30 @@ export function renderSessions(props: SessionsProps) {
             <div role="columnheader" scope="col" id="col-actions">Actions</div>
           </div>
         </div>
-        <div role="rowgroup">
-          ${
-            rows.length === 0
+        ${
+          rows.length === 0
+            ? html`<div role="status" class="muted">No sessions found.</div>`
+            : useVirtualScroll
               ? html`
-                  <div role="status" class="muted">No sessions found.</div>
+                  <virtual-list
+                    .items=${virtualItems}
+                    .itemHeight=${SESSION_ITEM_HEIGHT}
+                    .bufferSize=${SESSION_BUFFER_SIZE}
+                    .maxHeight=${600}
+                    .renderItem=${(item: SessionRowWithId) =>
+                      renderRow(item, props.basePath, props.onPatch, props.onDelete, props.loading)}
+                    containerClass="sessions-virtual-list"
+                    itemClass="table-row"
+                  ></virtual-list>
                 `
-              : rows.map((row) =>
-                  renderRow(row, props.basePath, props.onPatch, props.onDelete, props.loading),
-                )
-          }
-        </div>
+              : html`
+                  <div role="rowgroup">
+                    ${rows.map((row) =>
+                      renderRow(row, props.basePath, props.onPatch, props.onDelete, props.loading),
+                    )}
+                  </div>
+                `
+        }
       </div>
     </section>
   `;

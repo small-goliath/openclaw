@@ -34,6 +34,7 @@ import {
   createStatementCache,
   type PreparedStatementCacheStats,
 } from "./sqlite-cache.js";
+import { QueryPerformanceMonitor } from "./query-performance-monitor.js";
 const SNIPPET_MAX_CHARS = 700;
 const VECTOR_TABLE = "chunks_vec";
 const FTS_TABLE = "chunks_fts";
@@ -134,6 +135,7 @@ export class MemoryIndexManager implements MemorySearchManager {
   private intervalTimer: NodeJS.Timeout | null = null;
   private closed = false;
   private dirty = false;
+  private queryMonitor: QueryPerformanceMonitor;
   private sessionsDirty = false;
   private sessionsDirtyFiles = new Set<string>();
   private sessionPendingFiles = new Set<string>();
@@ -226,6 +228,7 @@ export class MemoryIndexManager implements MemorySearchManager {
     this.ensureBackgroundCleanup();
     this.dirty = this.sources.has("memory");
     this.batch = this.resolveBatchConfig();
+    this.queryMonitor = new QueryPerformanceMonitor();
   }
 
   /**
@@ -304,34 +307,36 @@ export class MemoryIndexManager implements MemorySearchManager {
       sessionKey?: string;
     },
   ): Promise<MemorySearchResult[]> {
-    // 쿼리 길이 검증
-    if (query.length > MAX_QUERY_LENGTH) {
-      throw new Error(
-        `Query exceeds maximum length of ${MAX_QUERY_LENGTH} characters (got ${query.length})`,
-      );
-    }
+    return this.queryMonitor.monitorQuery("memorySearch", async () => {
+      // 쿼리 길이 검증
+      if (query.length > MAX_QUERY_LENGTH) {
+        throw new Error(
+          `Query exceeds maximum length of ${MAX_QUERY_LENGTH} characters (got ${query.length})`,
+        );
+      }
 
-    void this.warmSession(opts?.sessionKey);
-    if (this.settings.sync.onSearch && (this.dirty || this.sessionsDirty)) {
-      void this.sync({ reason: "search" }).catch((err) => {
-        log.warn(`memory sync failed (search): ${String(err)}`);
-      });
-    }
-    const cleaned = query.trim();
-    if (!cleaned) {
-      return [];
-    }
+      void this.warmSession(opts?.sessionKey);
+      if (this.settings.sync.onSearch && (this.dirty || this.sessionsDirty)) {
+        void this.sync({ reason: "search" }).catch((err) => {
+          log.warn(`memory sync failed (search): ${String(err)}`);
+        });
+      }
+      const cleaned = query.trim();
+      if (!cleaned) {
+        return [];
+      }
 
-    // 타임아웃 적용된 검색 실행
-    return Promise.race([
-      this.executeSearch(cleaned, opts),
-      new Promise<MemorySearchResult[]>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`Query timeout after ${QUERY_TIMEOUT_MS}ms`)),
-          QUERY_TIMEOUT_MS,
+      // 타임아웃 적용된 검색 실행
+      return Promise.race([
+        this.executeSearch(cleaned, opts),
+        new Promise<MemorySearchResult[]>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`Query timeout after ${QUERY_TIMEOUT_MS}ms`)),
+            QUERY_TIMEOUT_MS,
+          ),
         ),
-      ),
-    ]);
+      ]);
+    });
   }
 
   private async executeSearch(
@@ -640,6 +645,7 @@ export class MemoryIndexManager implements MemorySearchManager {
         count: this.sessionDeltas.size,
         ttl: CACHE_CONFIG.sessionTTL,
       },
+      queryPerformance: this.queryMonitor.getPerformanceStats(),
     };
   }
 

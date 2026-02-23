@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import type { ProgramContext } from "./context.js";
 import { registerBrowserCli } from "../browser-cli.js";
 import { registerConfigCli } from "../config-cli.js";
+import { registerDevCli } from "../dev-cli.js";
 import { registerMemoryCli } from "../memory-cli.js";
 import { registerAgentCommands } from "./register.agent.js";
 import { registerConfigureCommand } from "./register.configure.js";
@@ -68,6 +69,10 @@ export const commandRegistry: CommandRegistration[] = [
   {
     id: "browser",
     register: ({ program }) => registerBrowserCli(program),
+  },
+  {
+    id: "dev",
+    register: ({ program }) => registerDevCli(program),
   },
 ];
 

@@ -10,6 +10,7 @@ import { ensureOpenClawCliOnPath } from "../infra/path-env.js";
 import { assertSupportedRuntime } from "../infra/runtime-guard.js";
 import { installUnhandledRejectionHandler } from "../infra/unhandled-rejections.js";
 import { enableConsoleCapture } from "../logging.js";
+import { initMemoryProfilingInDev } from "../utils/memory-profiler.js";
 import { getCommandPath, getPrimaryCommand, hasHelpOrVersion } from "./argv.js";
 import { tryRouteCli } from "./route.js";
 
@@ -66,6 +67,10 @@ export async function runCli(argv: string[] = process.argv) {
   const normalizedArgv = stripWindowsNodeExec(argv);
   loadDotEnv({ quiet: true });
   normalizeEnv();
+
+  // Initialize memory profiling in development mode for leak detection
+  initMemoryProfilingInDev();
+
   if (shouldEnsureCliPath(normalizedArgv)) {
     ensureOpenClawCliOnPath();
   }

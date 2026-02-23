@@ -8,7 +8,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { SessionEntry } from "../config/sessions/types.js";
 import { loadConfig, resolveConfigPath } from "../config/config.js";
-import { getSessionStorePath } from "../config/sessions/paths.js";
+import { resolveStorePath } from "../config/sessions/paths.js";
 import { loadSessionStore } from "../config/sessions/store.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 
@@ -161,6 +161,62 @@ export interface DataDeletionResult {
   failedCategories: Array<{ category: UserDataCategory; error: string }>;
   deletedCount: number;
   errors: string[];
+}
+
+/**
+ * 데이터 수정 요청 항목
+ */
+export interface DataRectificationItem {
+  /** 수정할 데이터 카테고리 */
+  category: UserDataCategory;
+  /** 수정할 데이터의 식별자 */
+  id?: string;
+  /** 수정할 필드와 값 */
+  updates: Record<string, unknown>;
+}
+
+/**
+ * 데이터 수정 옵션
+ */
+export interface DataRectificationOptions {
+  /** 수정할 데이터 항목 목록 */
+  items: DataRectificationItem[];
+  /** 수정 사유 */
+  reason?: string;
+}
+
+/**
+ * 카테고리별 수정 결과
+ */
+export interface CategoryRectificationResult {
+  /** 수정된 항목 수 */
+  updated: number;
+  /** 실패한 항목 수 */
+  failed: number;
+  /** 오류 메시지 (있는 경우) */
+  error?: string;
+}
+
+/**
+ * 데이터 수정 결과
+ */
+export interface DataRectificationResult {
+  success: boolean;
+  /** 카테고리별 수정 결과 */
+  updated: {
+    sessions: number;
+    memories: number;
+    credentials: number;
+    config: number;
+  };
+  /** 요청 ID */
+  requestId: string;
+  /** SLA 마감일 (30일 후) */
+  slaDeadline: string;
+  /** 수정된 항목 상세 */
+  details?: Record<string, CategoryRectificationResult>;
+  /** 오류 메시지 */
+  errors?: string[];
 }
 
 const DEFAULT_CATEGORIES: UserDataCategory[] = [
@@ -354,7 +410,7 @@ async function collectSessionData(
 ): Promise<Record<string, SessionEntry>> {
   try {
     const config = loadConfig();
-    const storePath = getSessionStorePath(config);
+    const storePath = resolveStorePath(config.session?.store);
     const store = loadSessionStore(storePath);
 
     // 사용자 ID로 필터링 (세션 키에 사용자 ID가 포함된 경우)
@@ -617,7 +673,7 @@ async function collectTranscripts(
 async function deleteSessionData(userId: string, opts: DataDeletionOptions): Promise<number> {
   try {
     const config = loadConfig();
-    const storePath = getSessionStorePath(config);
+    const storePath = resolveStorePath(config.session?.store);
 
     // 세션 스토어 로드 및 수정
     const store = loadSessionStore(storePath);
@@ -973,7 +1029,7 @@ async function createDataBackup(backupBasePath: string): Promise<string> {
 
   // 세션 백업
   try {
-    const sessionPath = getSessionStorePath(config);
+    const sessionPath = resolveStorePath(config.session?.store);
     const sessionBackupPath = path.join(backupPath, "sessions");
     await fs.mkdir(sessionBackupPath, { recursive: true });
     await copyFileIfExists(sessionPath, path.join(sessionBackupPath, "sessions.json"));
@@ -1054,7 +1110,7 @@ async function copyDirectoryIfExists(src: string, dest: string): Promise<void> {
 async function purgeExpiredSessions(cutoffDate: Date): Promise<number> {
   try {
     const config = loadConfig();
-    const storePath = getSessionStorePath(config);
+    const storePath = resolveStorePath(config.session?.store);
     const store = loadSessionStore(storePath);
 
     let deletedCount = 0;
@@ -1231,5 +1287,338 @@ export async function runDataRetentionJob(
   } catch (error) {
     log.error("Data retention job failed", { error: String(error) });
     throw error;
+  }
+}
+
+/**
+ * 사용자 데이터 수정 (GDPR Article 16 - 수정 권리)
+ * @param userId 사용자 ID
+ * @param opts 수정 옵션
+ * @returns 수정 결과
+ */
+export async function rectifyUserData(
+  userId: string,
+  opts: DataRectificationOptions,
+): Promise<DataRectificationResult> {
+  const requestId = `rect-${userId}-${Date.now()}`;
+  const slaDeadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
+
+  const result: DataRectificationResult = {
+    success: true,
+    updated: {
+      sessions: 0,
+      memories: 0,
+      credentials: 0,
+      config: 0,
+    },
+    requestId,
+    slaDeadline,
+    details: {},
+    errors: [],
+  };
+
+  log.info(`Starting data rectification for user: ${userId}`, { requestId, itemCount: opts.items.length });
+
+  // 감사 로그에 수정 요청 기록
+  await logRectificationRequest(userId, requestId, opts);
+
+  for (const item of opts.items) {
+    try {
+      switch (item.category) {
+        case "sessions": {
+          const sessionResult = await rectifySessionData(userId, item);
+          result.updated.sessions += sessionResult.updated;
+          result.details!.sessions = sessionResult;
+          break;
+        }
+        case "memories": {
+          const memoryResult = await rectifyMemoryData(userId, item);
+          result.updated.memories += memoryResult.updated;
+          result.details!.memories = memoryResult;
+          break;
+        }
+        case "credentials": {
+          const credResult = await rectifyCredentialData(userId, item);
+          result.updated.credentials += credResult.updated;
+          result.details!.credentials = credResult;
+          break;
+        }
+        case "config": {
+          const configResult = await rectifyConfigData(userId, item);
+          result.updated.config += configResult.updated;
+          result.details!.config = configResult;
+          break;
+        }
+        case "auditLogs":
+        case "transcripts": {
+          // 감사 로그와 트랜스크립트는 수정 불가 (불변성 유지)
+          log.warn(`Cannot rectify immutable category: ${item.category}`);
+          result.errors?.push(`${item.category}: 수정할 수 없는 데이터 카테고리입니다.`);
+          break;
+        }
+        default: {
+          result.errors?.push(`${item.category}: 지원하지 않는 데이터 카테고리입니다.`);
+        }
+      }
+    } catch (error) {
+      const errorMsg = String(error);
+      log.error(`Failed to rectify ${item.category} for user: ${userId}`, { error: errorMsg });
+      result.errors?.push(`${item.category}: ${errorMsg}`);
+    }
+  }
+
+  // 성공 여부 결정 (모든 항목이 실패한 경우만 실패로 간주)
+  const totalUpdated = result.updated.sessions + result.updated.memories +
+                       result.updated.credentials + result.updated.config;
+  result.success = totalUpdated > 0 || (result.errors?.length === 0);
+
+  // 감사 로그에 수정 완료 기록
+  await logRectificationCompletion(userId, requestId, result);
+
+  log.info(`Data rectification completed for user: ${userId}`, {
+    requestId,
+    success: result.success,
+    updated: result.updated,
+  });
+
+  return result;
+}
+
+/**
+ * 세션 데이터 수정
+ */
+async function rectifySessionData(
+  userId: string,
+  item: DataRectificationItem,
+): Promise<CategoryRectificationResult> {
+  const result: CategoryRectificationResult = { updated: 0, failed: 0 };
+
+  try {
+    const config = loadConfig();
+    const storePath = resolveStorePath(config.session?.store);
+
+    // 세션 스토어 업데이트
+    const { updateSessionStore } = await import("../config/sessions/store.js");
+    await updateSessionStore(storePath, async (store) => {
+      // 특정 세션 ID가 지정된 경우
+      if (item.id) {
+        const session = store[item.id];
+        if (session) {
+          // 세션 데이터 업데이트
+          for (const [key, value] of Object.entries(item.updates)) {
+            if (key in session) {
+              (session as Record<string, unknown>)[key] = value;
+            }
+          }
+          session.updatedAt = Date.now();
+          result.updated++;
+        } else {
+          result.failed++;
+          result.error = `세션을 찾을 수 없습니다: ${item.id}`;
+        }
+      } else {
+        // 모든 세션에 업데이트 적용
+        for (const [sessionKey, session] of Object.entries(store)) {
+          if (session) {
+            for (const [key, value] of Object.entries(item.updates)) {
+              if (key in session) {
+                (session as Record<string, unknown>)[key] = value;
+              }
+            }
+            session.updatedAt = Date.now();
+            result.updated++;
+          }
+        }
+      }
+      return result;
+    });
+  } catch (error) {
+    result.failed++;
+    result.error = String(error);
+    log.error("Failed to rectify session data", { error: String(error) });
+  }
+
+  return result;
+}
+
+/**
+ * 메모리 데이터 수정
+ */
+async function rectifyMemoryData(
+  userId: string,
+  item: DataRectificationItem,
+): Promise<CategoryRectificationResult> {
+  const result: CategoryRectificationResult = { updated: 0, failed: 0 };
+
+  try {
+    const config = loadConfig();
+    const memoryDir = resolveConfigPath(config.memory?.basePath ?? "./memory");
+
+    if (item.id) {
+      // 특정 메모리 파일 수정
+      const filePath = path.join(memoryDir, item.id);
+      try {
+        const stats = await fs.stat(filePath);
+        if (stats.isFile()) {
+          // 메모리 내용 업데이트
+          if (typeof item.updates.content === "string") {
+            await fs.writeFile(filePath, item.updates.content, "utf-8");
+            result.updated++;
+          } else {
+            result.failed++;
+            result.error = "메모리 내용(content)은 문자열이어야 합니다.";
+          }
+        }
+      } catch {
+        result.failed++;
+        result.error = `메모리 파일을 찾을 수 없습니다: ${item.id}`;
+      }
+    } else {
+      // 모든 메모리 파일 검색 및 수정
+      const files = await findMemoryFiles(memoryDir);
+      for (const filePath of files) {
+        try {
+          const relativePath = path.relative(memoryDir, filePath);
+          // 메타데이터 업데이트 (파일명 변경 등)
+          if (item.updates.path && typeof item.updates.path === "string") {
+            const newPath = path.join(memoryDir, item.updates.path);
+            await fs.mkdir(path.dirname(newPath), { recursive: true });
+            await fs.rename(filePath, newPath);
+            result.updated++;
+          }
+        } catch (error) {
+          result.failed++;
+          log.warn(`Failed to rectify memory file: ${filePath}`, { error: String(error) });
+        }
+      }
+    }
+  } catch (error) {
+    result.failed++;
+    result.error = String(error);
+    log.error("Failed to rectify memory data", { error: String(error) });
+  }
+
+  return result;
+}
+
+/**
+ * 자격 증명 데이터 수정
+ */
+async function rectifyCredentialData(
+  userId: string,
+  item: DataRectificationItem,
+): Promise<CategoryRectificationResult> {
+  const result: CategoryRectificationResult = { updated: 0, failed: 0 };
+
+  try {
+    // 자격 증명 수정은 설정 파일 업데이트로 처리
+    // 실제 구현에서는 안전한 방식으로 자격 증명을 업데이트
+    log.info("Credential rectification requested", { userId, updates: Object.keys(item.updates) });
+
+    // TODO: 설정 파일의 provider 설정 업데이트 구현
+    // 현재는 로깅만 수행
+    result.updated = 0;
+    result.error = "자격 증명 수정은 수동 검토가 필요합니다.";
+  } catch (error) {
+    result.failed++;
+    result.error = String(error);
+    log.error("Failed to rectify credential data", { error: String(error) });
+  }
+
+  return result;
+}
+
+/**
+ * 설정 데이터 수정
+ */
+async function rectifyConfigData(
+  userId: string,
+  item: DataRectificationItem,
+): Promise<CategoryRectificationResult> {
+  const result: CategoryRectificationResult = { updated: 0, failed: 0 };
+
+  try {
+    const config = loadConfig();
+
+    // 설정 업데이트 적용
+    for (const [key, value] of Object.entries(item.updates)) {
+      if (key in config && key !== "providers") { // providers는 민감 정보 포함
+        (config as Record<string, unknown>)[key] = value;
+        result.updated++;
+      }
+    }
+
+    // 설정 저장
+    const { saveConfig } = await import("../config/io.js");
+    await saveConfig(config);
+  } catch (error) {
+    result.failed++;
+    result.error = String(error);
+    log.error("Failed to rectify config data", { error: String(error) });
+  }
+
+  return result;
+}
+
+/**
+ * 수정 요청 감사 로그 기록
+ */
+async function logRectificationRequest(
+  userId: string,
+  requestId: string,
+  opts: DataRectificationOptions,
+): Promise<void> {
+  const logEntry: AuditLogEntry = {
+    timestamp: new Date().toISOString(),
+    action: "data_rectification_requested",
+    resource: "user_data",
+    userId,
+    details: {
+      requestId,
+      itemCount: opts.items.length,
+      categories: opts.items.map(i => i.category),
+      reason: opts.reason,
+    },
+  };
+
+  await appendAuditLog(logEntry);
+}
+
+/**
+ * 수정 완료 감사 로그 기록
+ */
+async function logRectificationCompletion(
+  userId: string,
+  requestId: string,
+  result: DataRectificationResult,
+): Promise<void> {
+  const logEntry: AuditLogEntry = {
+    timestamp: new Date().toISOString(),
+    action: "data_rectification_completed",
+    resource: "user_data",
+    userId,
+    details: {
+      requestId,
+      success: result.success,
+      updated: result.updated,
+      errorCount: result.errors?.length ?? 0,
+    },
+  };
+
+  await appendAuditLog(logEntry);
+}
+
+/**
+ * 감사 로그에 항목 추가
+ */
+async function appendAuditLog(entry: AuditLogEntry): Promise<void> {
+  try {
+    const config = loadConfig();
+    const auditLogPath = resolveConfigPath(config.logging?.auditLogPath ?? "./logs/audit.jsonl");
+
+    await fs.mkdir(path.dirname(auditLogPath), { recursive: true });
+    await fs.appendFile(auditLogPath, JSON.stringify(entry) + "\n", "utf-8");
+  } catch (error) {
+    log.error("Failed to write audit log", { error: String(error) });
   }
 }

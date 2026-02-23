@@ -18,3 +18,10 @@ export {
   type QueryPlan,
   type QueryPerformanceResult,
 } from "./memory-schema.js";
+
+// Query performance monitoring
+export {
+  QueryPerformanceMonitor,
+  type QueryPerformanceConfig,
+} from "./query-performance-monitor.js";
+export type { QueryPerformanceStats } from "./types.js";

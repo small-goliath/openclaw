@@ -414,12 +414,17 @@ export class ConsentStore {
    * 동의 변경 로그 기록
    * COMP-002: IP 주소 해싱 적용
    */
-  private async logConsentChange(type: ConsentType, state: ConsentState): Promise<void> {
+  private async logConsentChange(
+    type: ConsentType,
+    state: ConsentState,
+    clientIp?: string
+  ): Promise<void> {
     // IP 주소 해싱 (비동기)
     let ipHash: string | undefined;
     try {
-      // 서버 환경에서는 request IP 사용, 클라이언트 환경에서는 undefined
-      ipHash = undefined; // 서버 측에서 설정하도록 함
+      if (clientIp) {
+        ipHash = await hashIpAddress(clientIp);
+      }
     } catch {
       ipHash = undefined;
     }

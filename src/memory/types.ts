@@ -83,6 +83,7 @@ export type MemoryProviderStatus = {
     count: number;
     ttl: number;
   };
+  queryPerformance?: QueryPerformanceStats[];
   custom?: Record<string, unknown>;
 };
 
@@ -106,3 +107,14 @@ export interface MemorySearchManager {
   probeVectorAvailability(): Promise<boolean>;
   close?(): Promise<void>;
 }
+
+export type QueryPerformanceStats = {
+  queryName: string;
+  count: number;
+  avg: number;
+  p95: number;
+  p99: number;
+  max: number;
+  min: number;
+  slowQueries: number;
+};

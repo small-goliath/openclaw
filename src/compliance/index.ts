@@ -6,6 +6,8 @@
  * - 접근 권리 (Right to Access)
  * - 삭제 권리 (Right to Deletion / Right to be Forgotten)
  * - 데이터 이동성 권리 (Right to Data Portability)
+ * - 수정 권리 (Right to Rectification)
+ * - 이의 제기권 (Right to Object)
  *
  * 동의 관리:
  * - 세분화된 동의 관리 (necessary, functional, analytics, marketing)
@@ -19,6 +21,7 @@ export {
   exportUserData,
   exportPortableData,
   deleteUserData,
+  rectifyUserData,
   saveExportToFile,
   calculateExportSize,
   type UserDataExport,
@@ -30,11 +33,21 @@ export {
   type DataExportOptions,
   type DataDeletionOptions,
   type DataDeletionResult,
+  type DataRectificationOptions,
+  type DataRectificationResult,
+  type DataRectificationItem,
   type UserDataCategory,
 } from "./data-export.js";
 
 // GDPR API 엔드포인트
-export { handleGdprApiRequest, getGdprApiStatus, type GdprApiOptions } from "./gdpr-api.js";
+export {
+  handleGdprApiRequest,
+  getGdprApiStatus,
+  type GdprApiOptions,
+  type ObjectionPurpose,
+  type ObjectionRequest,
+  type ObjectionResult,
+} from "./gdpr-api.js";
 
 // 동의 관리 시스템
 export {

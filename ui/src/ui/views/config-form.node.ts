@@ -317,9 +317,10 @@ function renderTextInput(params: {
   disabled: boolean;
   showLabel?: boolean;
   inputType: "text" | "number";
+  error?: string;
   onPatch: (path: Array<string | number>, value: unknown) => void;
 }): TemplateResult {
-  const { schema, value, path, hints, disabled, onPatch, inputType } = params;
+  const { schema, value, path, hints, disabled, onPatch, inputType, error } = params;
   const showLabel = params.showLabel ?? true;
   const hint = hintForPath(path, hints);
   const label = hint?.label ?? schema.title ?? humanize(String(path.at(-1)));
@@ -340,7 +341,7 @@ function renderTextInput(params: {
   const helpId = help ? `help-${pathKey(path)}` : undefined;
 
   // Validation state for accessibility
-  const hasError = false; // TODO: Pass error state from parent
+  const hasError = error != null;
   const errorId = hasError ? `error-${pathKey(path)}` : undefined;
   const describedBy = [helpId, errorId].filter(Boolean).join(" ") || nothing;
 
@@ -351,7 +352,7 @@ function renderTextInput(params: {
       ${
         hasError
           ? html`<div class="cfg-field__error" id="${errorId}" role="alert" aria-live="polite">
-        <strong>Invalid value:</strong> Please enter a valid ${inputType === "number" ? "number" : "text"}.
+        <strong>Invalid value:</strong> ${error}
       </div>`
           : nothing
       }
@@ -366,6 +367,7 @@ function renderTextInput(params: {
           aria-labelledby="${labelId}"
           aria-describedby="${describedBy}"
           aria-invalid="${hasError ? "true" : "false"}"
+          aria-errormessage="${errorId || nothing}"
           @input=${(e: Event) => {
             const raw = (e.target as HTMLInputElement).value;
             if (inputType === "number") {
@@ -394,6 +396,7 @@ function renderTextInput(params: {
             type="button"
             class="cfg-input__reset"
             title="Reset to default"
+            aria-label="Reset ${label} to default"
             ?disabled=${disabled}
             @click=${() => onPatch(path, schema.default)}
           >↺</button>
@@ -412,9 +415,10 @@ function renderNumberInput(params: {
   hints: ConfigUiHints;
   disabled: boolean;
   showLabel?: boolean;
+  error?: string;
   onPatch: (path: Array<string | number>, value: unknown) => void;
 }): TemplateResult {
-  const { schema, value, path, hints, disabled, onPatch } = params;
+  const { schema, value, path, hints, disabled, onPatch, error } = params;
   const showLabel = params.showLabel ?? true;
   const hint = hintForPath(path, hints);
   const label = hint?.label ?? schema.title ?? humanize(String(path.at(-1)));
@@ -426,7 +430,7 @@ function renderNumberInput(params: {
   const helpId = help ? `help-${pathKey(path)}` : undefined;
 
   // Validation state for accessibility
-  const hasError = false; // TODO: Pass error state from parent
+  const hasError = error != null;
   const errorId = hasError ? `error-${pathKey(path)}` : undefined;
   const describedBy = [helpId, errorId].filter(Boolean).join(" ") || nothing;
 
@@ -437,7 +441,7 @@ function renderNumberInput(params: {
       ${
         hasError
           ? html`<div class="cfg-field__error" id="${errorId}" role="alert" aria-live="polite">
-        <strong>Invalid number:</strong> Please enter a valid number${schema.minimum !== undefined ? ` (minimum: ${schema.minimum})` : ""}${schema.maximum !== undefined ? ` (maximum: ${schema.maximum})` : ""}.
+        <strong>Invalid number:</strong> ${error}
       </div>`
           : nothing
       }
@@ -448,6 +452,7 @@ function renderNumberInput(params: {
           ?disabled=${disabled}
           @click=${() => onPatch(path, numValue - 1)}
           aria-label="Decrease ${label}"
+          title="Decrease ${label}"
         >−</button>
         <input
           id="${fieldId}"
@@ -458,6 +463,7 @@ function renderNumberInput(params: {
           aria-labelledby="${labelId}"
           aria-describedby="${describedBy}"
           aria-invalid="${hasError ? "true" : "false"}"
+          aria-errormessage="${errorId || nothing}"
           @input=${(e: Event) => {
             const raw = (e.target as HTMLInputElement).value;
             const parsed = raw === "" ? undefined : Number(raw);
@@ -470,6 +476,7 @@ function renderNumberInput(params: {
           ?disabled=${disabled}
           @click=${() => onPatch(path, numValue + 1)}
           aria-label="Increase ${label}"
+          title="Increase ${label}"
         >+</button>
       </div>
     </div>
@@ -484,9 +491,10 @@ function renderSelect(params: {
   disabled: boolean;
   showLabel?: boolean;
   options: unknown[];
+  error?: string;
   onPatch: (path: Array<string | number>, value: unknown) => void;
 }): TemplateResult {
-  const { schema, value, path, hints, disabled, options, onPatch } = params;
+  const { schema, value, path, hints, disabled, options, onPatch, error } = params;
   const showLabel = params.showLabel ?? true;
   const hint = hintForPath(path, hints);
   const label = hint?.label ?? schema.title ?? humanize(String(path.at(-1)));
@@ -501,7 +509,7 @@ function renderSelect(params: {
   const helpId = help ? `help-${pathKey(path)}` : undefined;
 
   // Validation state for accessibility
-  const hasError = false; // TODO: Pass error state from parent
+  const hasError = error != null;
   const errorId = hasError ? `error-${pathKey(path)}` : undefined;
   const describedBy = [helpId, errorId].filter(Boolean).join(" ") || nothing;
 
@@ -512,7 +520,7 @@ function renderSelect(params: {
       ${
         hasError
           ? html`<div class="cfg-field__error" id="${errorId}" role="alert" aria-live="polite">
-        <strong>Selection required:</strong> Please select a valid option from the list.
+        <strong>Selection required:</strong> ${error}
       </div>`
           : nothing
       }
@@ -524,6 +532,7 @@ function renderSelect(params: {
         aria-labelledby="${labelId}"
         aria-describedby="${describedBy}"
         aria-invalid="${hasError ? "true" : "false"}"
+        aria-errormessage="${errorId || nothing}"
         @change=${(e: Event) => {
           const val = (e.target as HTMLSelectElement).value;
           onPatch(path, val === unset ? undefined : options[Number(val)]);
@@ -722,6 +731,7 @@ function renderArray(params: {
                   type="button"
                   class="cfg-array__item-remove"
                   title="Remove item"
+                  aria-label="Remove ${label} item #${idx + 1}"
                   ?disabled=${disabled}
                   @click=${() => {
                     const next = [...arr];
@@ -868,6 +878,7 @@ function renderMapField(params: {
                   type="button"
                   class="cfg-map__item-remove"
                   title="Remove entry"
+                  aria-label="Remove entry ${key}"
                   ?disabled=${disabled}
                   @click=${() => {
                     const next = { ...value };

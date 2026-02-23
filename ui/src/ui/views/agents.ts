@@ -129,15 +129,17 @@ export function renderAgents(props: AgentsProps) {
               : agents.map((agent) => {
                   const badge = agentBadgeText(agent.id, defaultId);
                   const emoji = resolveAgentEmoji(agent, props.agentIdentityById[agent.id] ?? null);
+                  const agentLabel = normalizeAgentLabel(agent);
                   return html`
                     <button
                       type="button"
                       class="agent-row ${selectedId === agent.id ? "active" : ""}"
                       @click=${() => props.onSelectAgent(agent.id)}
+                      aria-label="Select agent ${agentLabel}"
                     >
-                      <div class="agent-avatar">${emoji || normalizeAgentLabel(agent).slice(0, 1)}</div>
+                      <div class="agent-avatar">${emoji || agentLabel.slice(0, 1)}</div>
                       <div class="agent-info">
-                        <div class="agent-title">${normalizeAgentLabel(agent)}</div>
+                        <div class="agent-title">${agentLabel}</div>
                         <div class="agent-sub mono">${agent.id}</div>
                       </div>
                       ${badge ? html`<span class="agent-pill">${badge}</span>` : nothing}

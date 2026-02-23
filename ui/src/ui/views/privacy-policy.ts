@@ -559,12 +559,12 @@ export class PrivacyPolicyPage extends LitElement {
 
   render() {
     return html`
-      <div class="page-header">
+      <div class="page-header" lang="ko">
         <h1>개인정보 처리방침</h1>
         <p class="last-updated">최종 업데이트: ${this.lastUpdated}</p>
       </div>
 
-      <section>
+      <section lang="ko">
         <h2>1. 소개</h2>
         <p>
           OpenClaw(이하 "회사")는 사용자의 개인정보 보호를 매우 중요하게 생각합니다. 
@@ -577,7 +577,7 @@ export class PrivacyPolicyPage extends LitElement {
         </p>
       </section>
 
-      <section>
+      <section lang="ko">
         <h2>2. 수집하는 개인정보</h2>
         <p>당사는 다음과 같은 개인정보를 수집할 수 있습니다:</p>
         
@@ -619,7 +619,7 @@ export class PrivacyPolicyPage extends LitElement {
         </table>
       </section>
 
-      <section>
+      <section lang="ko">
         <h2>3. 개인정보 이용 목적</h2>
         <p>당사는 수집한 개인정보를 다음의 목적으로 이용합니다:</p>
         <ul>
@@ -631,7 +631,7 @@ export class PrivacyPolicyPage extends LitElement {
         </ul>
       </section>
 
-      <section>
+      <section lang="ko">
         <h2>4. 개인정보 제3자 제공</h2>
         <p>
           당사는 원칙적으로 사용자의 개인정보를 제3자에게 제공하지 않습니다. 
@@ -644,7 +644,7 @@ export class PrivacyPolicyPage extends LitElement {
         </ul>
       </section>
 
-      <section>
+      <section lang="ko">
         <h2>5. 정보주체의 권리</h2>
         <p>사용자는 다음과 같은 권리를 가집니다:</p>
         
@@ -683,7 +683,7 @@ export class PrivacyPolicyPage extends LitElement {
         </div>
       </section>
 
-      <section>
+      <section lang="ko">
         <h2>6. 쿠키 및 유사 기술</h2>
         <p>
           당사는 사용자 경험 개선 및 서비스 분석을 위해 쿠키와 유사한 기술을 사용합니다. 
@@ -764,7 +764,7 @@ export class PrivacyPolicyPage extends LitElement {
         </div>
       </section>
 
-      <section>
+      <section lang="ko">
         <h2>7. 동의 기록 및 감사</h2>
         <p>
           당사는 투명성과 규정 준수를 위해 모든 동의 결정을 기록합니다. 
@@ -821,7 +821,7 @@ export class PrivacyPolicyPage extends LitElement {
         }
       </section>
 
-      <section>
+      <section lang="ko">
         <h2>8. 개인정보 보호책임자</h2>
         <div class="contact-info">
           <h4>개인정보 보호책임자 (DPO)</h4>
@@ -839,7 +839,7 @@ export class PrivacyPolicyPage extends LitElement {
         </div>
       </section>
 
-      <section>
+      <section lang="ko">
         <h2>9. 개인정보 처리방침 변경</h2>
         <p>
           본 개인정보 처리방침은 법률 변경 또는 서비스 개선에 따라 수정될 수 있습니다. 
@@ -851,7 +851,7 @@ export class PrivacyPolicyPage extends LitElement {
         </p>
       </section>
 
-      <section>
+      <section lang="ko">
         <h2>10. 준거법 및 분쟁 해결</h2>
         <p>
           본 개인정보 처리방침은 대한민국 법률에 따라 규율되며, 

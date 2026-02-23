@@ -14,6 +14,8 @@ import {
   UsageTotals,
   CostDailyEntry,
 } from "./usageTypes.ts";
+import "../components/virtual-list.ts";
+import type { VirtualListItem } from "../components/virtual-list.ts";
 
 function pct(part: number, total: number): number {
   if (total === 0) {
@@ -21,6 +23,27 @@ function pct(part: number, total: number): number {
   }
   return (part / total) * 100;
 }
+
+/**
+ * Threshold for enabling virtual scrolling
+ * Lists smaller than this will render normally for better UX
+ */
+const VIRTUAL_SCROLL_THRESHOLD = 50;
+
+/**
+ * Default item height for session rows in usage view
+ */
+const USAGE_SESSION_ITEM_HEIGHT = 48;
+
+/**
+ * Buffer size for smooth scrolling
+ */
+const USAGE_BUFFER_SIZE = 5;
+
+/**
+ * Session entry with virtual list item interface
+ */
+type UsageSessionEntryWithId = UsageSessionEntry & VirtualListItem;
 
 function getCostBreakdown(totals: UsageTotals) {
   // Use actual costs from API data (already aggregated in backend)
@@ -92,7 +115,7 @@ function renderFilterChips(
           ? html`
             <div class="filter-chip">
               <span class="filter-chip-label">Days: ${daysLabel}</span>
-              <button class="filter-chip-remove" @click=${onClearDays} title="Remove filter">×</button>
+              <button class="filter-chip-remove" @click=${onClearDays} title="Remove filter" aria-label="Remove days filter">×</button>
             </div>
           `
           : nothing
@@ -102,7 +125,7 @@ function renderFilterChips(
           ? html`
             <div class="filter-chip">
               <span class="filter-chip-label">Hours: ${hoursLabel}</span>
-              <button class="filter-chip-remove" @click=${onClearHours} title="Remove filter">×</button>
+              <button class="filter-chip-remove" @click=${onClearHours} title="Remove filter" aria-label="Remove hours filter">×</button>
             </div>
           `
           : nothing
@@ -112,7 +135,7 @@ function renderFilterChips(
           ? html`
             <div class="filter-chip" title="${sessionsFullName}">
               <span class="filter-chip-label">Session: ${sessionsLabel}</span>
-              <button class="filter-chip-remove" @click=${onClearSessions} title="Remove filter">×</button>
+              <button class="filter-chip-remove" @click=${onClearSessions} title="Remove filter" aria-label="Remove sessions filter">×</button>
             </div>
           `
           : nothing
@@ -657,6 +680,55 @@ function renderSessionsCard(
     .map((key) => sessionMap.get(key))
     .filter((entry): entry is UsageSessionEntry => Boolean(entry));
 
+  // Prepare virtual list items for "All" tab when there are many sessions
+  const useVirtualScroll =
+    sessionsTab === "all" && sortedWithDir.length > VIRTUAL_SCROLL_THRESHOLD;
+  const virtualItems: UsageSessionEntryWithId[] = useVirtualScroll
+    ? sortedWithDir.map((s) => ({ ...s, id: s.key }))
+    : [];
+
+  // Render function for virtual list items
+  const renderVirtualSessionItem = (
+    s: UsageSessionEntryWithId,
+    _index: number,
+    isSelected?: boolean,
+  ) => {
+    const value = getSessionValue(s);
+    const displayLabel = formatSessionListLabel(s);
+    const meta = buildSessionMeta(s);
+
+    return html`
+      <div
+        class="session-bar-row ${isSelected ? "selected" : ""}"
+        @click=${(e: MouseEvent) => onSelectSession(s.key, e.shiftKey)}
+        title="${s.key}"
+      >
+        <div class="session-bar-label">
+          <div class="session-bar-title">${displayLabel}</div>
+          ${meta.length > 0
+            ? html`<div class="session-bar-meta">${meta.join(" · ")}</div>`
+            : nothing}
+        </div>
+        <div class="session-bar-track" style="display: none;"></div>
+        <div class="session-bar-actions">
+          <button
+            class="session-copy-btn"
+            title="Copy session name"
+            @click=${(e: MouseEvent) => {
+              e.stopPropagation();
+              void copySessionName(s);
+            }}
+          >
+            Copy
+          </button>
+          <div class="session-bar-value">
+            ${isTokenMode ? formatTokens(value) : formatCost(value)}
+          </div>
+        </div>
+      </div>
+    `;
+  };
+
   return html`
     <div class="card sessions-card">
       <div class="sessions-card-header">
@@ -759,44 +831,61 @@ function renderSessionsCard(
             ? html`
                 <div class="muted" style="padding: 20px; text-align: center">No sessions in range</div>
               `
-            : html`
-                <div class="session-bars">
-                  ${sortedWithDir.slice(0, 50).map((s) => {
-                    const value = getSessionValue(s);
-                    const isSelected = selectedSessions.includes(s.key);
-                    const displayLabel = formatSessionListLabel(s);
-                    const meta = buildSessionMeta(s);
+            : useVirtualScroll
+              ? html`
+                  <virtual-list
+                    .items=${virtualItems}
+                    .itemHeight=${USAGE_SESSION_ITEM_HEIGHT}
+                    .bufferSize=${USAGE_BUFFER_SIZE}
+                    .maxHeight=${400}
+                    .renderItem=${renderVirtualSessionItem}
+                    .selectedKeys=${selectedSessions}
+                    .onSelect=${onSelectSession}
+                    containerClass="sessions-virtual-list"
+                    itemClass="session-bar-row"
+                  ></virtual-list>
+                  <div class="muted" style="padding: 8px; text-align: center; font-size: 11px;">
+                    Virtual scroll: ${sortedWithDir.length} sessions
+                  </div>
+                `
+              : html`
+                  <div class="session-bars">
+                    ${sortedWithDir.slice(0, 50).map((s) => {
+                      const value = getSessionValue(s);
+                      const isSelected = selectedSessions.includes(s.key);
+                      const displayLabel = formatSessionListLabel(s);
+                      const meta = buildSessionMeta(s);
 
-                    return html`
-                      <div
-                        class="session-bar-row ${isSelected ? "selected" : ""}"
-                        @click=${(e: MouseEvent) => onSelectSession(s.key, e.shiftKey)}
-                        title="${s.key}"
-                      >
-                        <div class="session-bar-label">
-                          <div class="session-bar-title">${displayLabel}</div>
-                          ${meta.length > 0 ? html`<div class="session-bar-meta">${meta.join(" · ")}</div>` : nothing}
+                      return html`
+                        <div
+                          class="session-bar-row ${isSelected ? "selected" : ""}"
+                          @click=${(e: MouseEvent) => onSelectSession(s.key, e.shiftKey)}
+                          title="${s.key}"
+                        >
+                          <div class="session-bar-label">
+                            <div class="session-bar-title">${displayLabel}</div>
+                            ${meta.length > 0 ? html`<div class="session-bar-meta">${meta.join(" · ")}</div>` : nothing}
+                          </div>
+                          <div class="session-bar-track" style="display: none;"></div>
+                          <div class="session-bar-actions">
+                            <button
+                              class="session-copy-btn"
+                              title="Copy session name"
+                              @click=${(e: MouseEvent) => {
+                                e.stopPropagation();
+                                void copySessionName(s);
+                              }}
+                            >
+                              Copy
+                            </button>
+                            <div class="session-bar-value">${isTokenMode ? formatTokens(value) : formatCost(value)}</div>
+                          </div>
                         </div>
-                        <div class="session-bar-track" style="display: none;"></div>
-                        <div class="session-bar-actions">
-                          <button
-                            class="session-copy-btn"
-                            title="Copy session name"
-                            @click=${(e: MouseEvent) => {
-                              e.stopPropagation();
-                              void copySessionName(s);
-                            }}
-                          >
-                            Copy
-                          </button>
-                          <div class="session-bar-value">${isTokenMode ? formatTokens(value) : formatCost(value)}</div>
-                        </div>
-                      </div>
-                    `;
-                  })}
-                  ${sessions.length > 50 ? html`<div class="muted" style="padding: 8px; text-align: center; font-size: 11px;">+${sessions.length - 50} more</div>` : nothing}
-                </div>
-              `
+                      `;
+                    })}
+                    ${sessions.length > 50 ? html`<div class="muted" style="padding: 8px; text-align: center; font-size: 11px;">+${sessions.length - 50} more</div>` : nothing}
+                  </div>
+                `
       }
       ${
         selectedCount > 1
