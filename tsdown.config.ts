@@ -42,4 +42,10 @@ export default defineConfig([
     fixedExtension: false,
     platform: "node",
   },
+  {
+    entry: "src/workers/crypto-worker.ts",
+    env,
+    fixedExtension: false,
+    platform: "node",
+  },
 ]);
