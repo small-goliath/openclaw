@@ -1,6 +1,7 @@
 services:
   openclaw-gateway:
     image: ${OPENCLAW_IMAGE:-openclaw:local}
+    user: "${USER_ID:-1000}:${GROUP_ID:-1000}"
     environment:
       HOME: /home/node
       TERM: xterm-256color
@@ -29,6 +30,7 @@ services:
 
   openclaw-cli:
     image: ${OPENCLAW_IMAGE:-openclaw:local}
+    user: "${USER_ID:-1000}:${GROUP_ID:-1000}"
     environment:
       HOME: /home/node
       TERM: xterm-256color
